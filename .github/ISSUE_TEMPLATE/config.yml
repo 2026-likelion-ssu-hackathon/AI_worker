@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 팀 공유용 개요
+    url: https://github.com/2026-likelion-ssu-hackathon/AI_worker/blob/main/docs/overview.md
+    about: 이 워커가 뭘 하는지 · 팀별 확인 사항
+  - name: 코드 설명서
+    url: https://github.com/2026-likelion-ssu-hackathon/AI_worker/blob/main/README.md
+    about: 모듈별 역할 · 튜닝 포인트 · 실행 방법
