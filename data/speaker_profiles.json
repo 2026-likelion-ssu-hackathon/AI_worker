@@ -1,0 +1,20 @@
+[
+  {
+    "speaker": "A",
+    "avg_length": 21.0,
+    "period_rate": 0.03,
+    "laugh_per_msg": 2.8,
+    "emoji_rate": 0.35,
+    "top_address": ["오빠", "자기"],
+    "conflict_style": "화가 나면 문장이 짧아지고 평소 안 쓰던 마침표를 찍는다"
+  },
+  {
+    "speaker": "B",
+    "avg_length": 18.0,
+    "period_rate": 0.05,
+    "laugh_per_msg": 2.0,
+    "emoji_rate": 0.20,
+    "top_address": ["애기야", "자기"],
+    "conflict_style": "화가 나면 말수가 늘고 갑자기 존댓말로 바뀐다"
+  }
+]

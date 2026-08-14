@@ -1,0 +1,218 @@
+[
+  {
+    "id": "m01",
+    "kind": "place",
+    "content": "성수동 카페 오르에르",
+    "source_quote": "여기 분위기 진짜 좋다 다음에 또 오자",
+    "occurred_at": "2025-10-14T15:20:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m02",
+    "kind": "place",
+    "content": "처음 만났던 홍대 골목 떡볶이집",
+    "source_quote": "그때 그 떡볶이집 아직 있으려나 국물떡볶이 맛있었는데",
+    "occurred_at": "2025-06-02T19:40:00+09:00",
+    "used_at": "2026-01-10T21:00:00+09:00"
+  },
+  {
+    "id": "m03",
+    "kind": "place",
+    "content": "강릉 안목해변",
+    "source_quote": "바다 보니까 속이 다 시원하다 여기 또 오고 싶어",
+    "occurred_at": "2025-08-09T11:05:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m13",
+    "kind": "place",
+    "content": "을지로 노포 고깃집",
+    "source_quote": "여기 소고기 진짜 부드럽다 고기 먹으러 또 오자",
+    "occurred_at": "2025-09-19T20:15:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m14",
+    "kind": "place",
+    "content": "남산 올라가는 계단길",
+    "source_quote": "계단 진짜 많았는데 위에서 본 야경은 진짜 예뻤어",
+    "occurred_at": "2025-11-02T19:30:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m15",
+    "kind": "place",
+    "content": "동네 단골 국밥집",
+    "source_quote": "추운 날엔 여기 국밥이 최고야 밥 먹고 가자",
+    "occurred_at": "2026-01-24T12:40:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m04",
+    "kind": "activity",
+    "content": "같이 간 성수 방탈출 카페",
+    "source_quote": "우리 진짜 아슬아슬하게 나왔잖아 ㅋㅋ 마지막 힌트 아니었으면 못 나왔어",
+    "occurred_at": "2025-11-22T17:10:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m05",
+    "kind": "activity",
+    "content": "연말에 본 심야 영화",
+    "source_quote": "졸릴 줄 알았는데 끝까지 다 봤네 엔딩 좋았어",
+    "occurred_at": "2025-12-30T23:50:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m06",
+    "kind": "activity",
+    "content": "한강 자전거 타기",
+    "source_quote": "다리 아파 죽겠는데 바람 시원해서 계속 타고 싶더라",
+    "occurred_at": "2026-04-18T16:30:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m16",
+    "kind": "activity",
+    "content": "지하철 타고 간 당일치기 여행",
+    "source_quote": "지하철에서 둘 다 졸다가 종점까지 갔잖아 ㅋㅋ 진짜 웃겼어",
+    "occurred_at": "2026-05-09T10:20:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m17",
+    "kind": "activity",
+    "content": "같이 간 동네 노래방",
+    "source_quote": "너 그 노래 부를 때 진짜 웃겼어 다음에 또 가자",
+    "occurred_at": "2026-02-28T22:10:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m18",
+    "kind": "activity",
+    "content": "함께 본 야구 경기",
+    "source_quote": "9회에 역전할 때 둘이 같이 소리 질렀잖아",
+    "occurred_at": "2026-06-27T21:05:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m07",
+    "kind": "promise",
+    "content": "같이 가기로 한 사진 전시",
+    "source_quote": "이 전시 재밌겠다 다음 주에 같이 가자",
+    "occurred_at": "2026-03-07T13:15:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m08",
+    "kind": "promise",
+    "content": "등록하기로 한 파스타 쿠킹 클래스",
+    "source_quote": "우리 파스타 만들기 클래스 등록하자 재밌을 것 같아",
+    "occurred_at": "2026-05-21T20:05:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m19",
+    "kind": "promise",
+    "content": "같이 보러 가기로 한 벚꽃",
+    "source_quote": "내년 봄엔 진짜 벚꽃 보러 가자 올해는 놓쳤잖아",
+    "occurred_at": "2026-04-05T18:20:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m20",
+    "kind": "promise",
+    "content": "같이 배우기로 한 수영",
+    "source_quote": "우리 둘 다 수영 못 하니까 같이 배우러 다니자",
+    "occurred_at": "2026-06-02T21:45:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m21",
+    "kind": "promise",
+    "content": "가보기로 한 캠핑",
+    "source_quote": "장비 빌려서라도 캠핑 한 번 가보자 별 보고 싶어",
+    "occurred_at": "2026-07-14T22:30:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m09",
+    "kind": "wish",
+    "content": "연남동 크림파스타집",
+    "source_quote": "아 배고파 여기 크림파스타 진짜 맛있어 보인다 언제 먹으러 가지",
+    "occurred_at": "2026-06-11T22:40:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m10",
+    "kind": "wish",
+    "content": "가보고 싶다던 마라탕 맛집",
+    "source_quote": "요즘 마라탕 땡기는데 여기 배고플 때 가보고 싶다",
+    "occurred_at": "2026-07-02T21:20:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m22",
+    "kind": "wish",
+    "content": "먹어보고 싶다던 평양냉면집",
+    "source_quote": "여름엔 여기 냉면 먹어봐야 한대 저장해둘게",
+    "occurred_at": "2026-07-19T13:10:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m23",
+    "kind": "wish",
+    "content": "사고 싶다던 커플 잠옷",
+    "source_quote": "이 잠옷 귀엽다 링크 보내놨어 나중에 사자",
+    "occurred_at": "2026-03-29T23:15:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m24",
+    "kind": "wish",
+    "content": "가보고 싶다던 제주도 오름",
+    "source_quote": "여기 사진 봤는데 진짜 예쁘다 제주도 가면 꼭 올라가보고 싶어",
+    "occurred_at": "2026-05-30T20:50:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m11",
+    "kind": "interest",
+    "content": "둘 다 좋아하는 밴드 신곡",
+    "source_quote": "이 밴드 신곡 나왔대 이어폰 한 쪽씩 끼고 듣자",
+    "occurred_at": "2026-02-14T18:00:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m12",
+    "kind": "interest",
+    "content": "동네에서 자주 보는 삼색 고양이",
+    "source_quote": "길에서 본 삼색이 너무 귀여웠어 사진 찍어뒀어",
+    "occurred_at": "2026-07-28T09:25:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m25",
+    "kind": "interest",
+    "content": "둘이 챙겨 보는 예능",
+    "source_quote": "이번 주 방송 봤어? 그 장면에서 진짜 웃겨서 혼자 소리 질렀잖아",
+    "occurred_at": "2026-06-20T22:55:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m26",
+    "kind": "interest",
+    "content": "같이 하는 모바일 게임",
+    "source_quote": "오늘 접속했어? 같이 하면 훨씬 빨리 깨는데",
+    "occurred_at": "2026-07-25T21:40:00+09:00",
+    "used_at": null
+  },
+  {
+    "id": "m27",
+    "kind": "interest",
+    "content": "필름 카메라로 사진 찍기",
+    "source_quote": "필름 다 썼는데 현상 맡기면 뭐 나올지 궁금하다",
+    "occurred_at": "2026-04-30T17:35:00+09:00",
+    "used_at": null
+  }
+]

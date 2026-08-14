@@ -1,0 +1,7 @@
+langchain>=1.3
+langchain-openai>=1.5
+pydantic>=2
+python-dotenv
+
+# InMemoryVectorStore 의 cosine similarity 계산에 필요
+numpy
