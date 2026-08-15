@@ -9,37 +9,42 @@ Claude Code 세션 시작 시 이 문서를 읽히고 **단계 번호를 지정�
 
 ---
 
-## 진행 상황 (2026-08-14)
+## 진행 상황 (2026-08-16)
 
 | 단계 | 내용 | 상태 |
 | --- | --- | --- |
 | 0 | 세팅 | ✅ 완료 |
-| 1 | 스키마 + 픽스처 | ✅ 완료 |
-| 2 | 룰 게이트 | ✅ 완료 |
-| 3 | LLM judge | ✅ 완료 |
-| 4 | RAG 기억 검색 | ✅ 완료 |
-| 5 | 소재 생성 + 필터 | ✅ 완료 |
-| 6 | 조립 + CLI | ✅ 완료 |
-| 7 | 갈등 중재 (말투 교정 제안) | ✅ 완료 |
-| 8 | 남은 것 — 아래 참조 | ⏸️ 대기 |
+| 1 | 스키마 + 픽스처 | ✅ 완료 → 9단계에서 규격서 기준으로 교체 |
+| 2 | 룰 게이트 | ✅ 완료 → **파킹** (`parked/gate.py`) |
+| 3 | LLM judge | ✅ 완료 → **파킹** (기억 추출만 `worker/extract.py` 로 분리) |
+| 4 | RAG 기억 검색 | ✅ 완료 (유지 — 데이트 코스가 쓴다) |
+| 5 | 소재 생성 + 필터 | ✅ 완료 → 소재는 **파킹**, 필터는 새 결과 구조로 재작성 |
+| 6 | 조립 + CLI | ✅ 완료 → 9단계에서 재작성 |
+| 7 | 갈등 중재 (말투 교정 제안) | ✅ 완료 → 9단계에서 출력 4필드로 확장 |
+| 8 | (기존 8단계) 방향 문구 분기 결정 | ✅ **해소됨** — 규격서에서 두 필드로 갈리면서 분기 자체가 사라짐 |
+| 9 | 백엔드 규격 v1 반영 + 신규 후보 2종 | ✅ 완료 |
+| 10 | 외부 API 키 연결 + 실측 | ⏸️ **대기 — 키 발급 필요** |
 
 ---
 
-## MVP의 목표 — 달성함
+## 현재 상태
 
-**채팅 데이터를 넣으면 적절한 개입을 산출하는 엔진.**
+**채팅 데이터를 넣으면 규격서 응답을 산출하는 엔진.**
 
 ```bash
-$ python -m tools.run fixtures/case3_one_sided.json
+$ .venv/bin/python -m tools.run fixtures/case7_tone.json --no-persist
 
-▸ case3_one_sided.json
-  트리거   one_sided (한쪽만 발화)
-  scope    individual → A
-  소재     "5월 9일 지하철 종점까지 갔던 날, 기억나세요?"
-  근거     5월 9일 두 분이 지하철로 다녀오신 일이에요
+▸ case7_tone.json   status=COMPLETED
+  TONE_CORRECTION   INDIVIDUAL → USER_A   trigger=[105]
+    진단   지금 표현이 평소보다 세게 나갔어요
+    안내   대신 이렇게 상대방에게 말해보세요.
+    대체   "자기 오늘 못 온다니 좀 서운했어, 다음엔 미리 말해줘"
+    이유   '맨날'이 그동안 전부를 탓하는 말로 들려요
 ```
 
-**구현하지 않은 것**: Redis, Postgres, 회신 API, LangGraph, 점수 기반 스코어링.
+`--json` 을 붙이면 백엔드에 나가는 규격서 응답이 그대로 나온다.
+
+**구현하지 않은 것**: HTTP 서버, Redis, Postgres, LangGraph, 감정 분석.
 필요해 보여도 사용자에게 먼저 확인할 것.
 
 ---
@@ -237,26 +242,164 @@ fixtures/case8_banter.json
 
 ---
 
-## 8단계 — 남은 것 ⏸️
+## 8단계 — 해소됨 ✅
+
+기존 8단계의 유일한 코드 항목이었던 "방향 문구 (a)/(b) 분기 여부 결정"은 **없어졌다.**
+규격서 8장이 `situationDiagnosis`(감정 짚기)와 `correctionReason`(표현 설명)을
+**둘 다 필수 필드**로 정의하면서, 둘 중 하나를 고르는 문제 자체가 사라졌다.
+
+---
+
+## 9단계 — 백엔드 규격 v1 반영 + 신규 후보 2종 ✅
+
+입력이 `docs/contract-v1.md` 로 확정되고 PM 기능 명세가 3종으로 바뀌었다 (`docs/spec-v2.md`).
+
+### 파킹 — 대화 소재 제시
+
+우선순위에서 밀려 `parked/` 로 뺐다. 복구 방법은 `parked/README.md`.
+
+**RAG 와 기억 추출은 파킹하지 않았다.** 규격서 9장의 추천 이유 예시가
+"3주 전에 상대방이 성수에 가보고 싶다고 한 내용" 이라, 기억 저장소가 데이트 코스의
+재료 그 자체다. `judge.py` 에 붙어 있던 기억 추출만 `worker/extract.py` 로 떼어냈다.
+
+`gate.py` 안의 문장 판별 유틸(`is_reaction`/`is_question`)은 `worker/text.py` 로 뺐다.
+`retrieve.py` 와 데이트 코스 트리거가 쓰기 때문이다.
+
+### 스키마 — 규격서 그대로
+
+- [x] `AnalysisRequest` / `AnalysisResponse` / `AiResult` / 기능별 `resultData`
+- [x] camelCase 직렬화 (`alias_generator=to_camel`), 선택 필드 생략, 빈 목록 `[]`
+- [x] `USER_A`/`USER_B` ↔ 내부 `A`/`B` 경계 변환
+- [x] 타임존 없는 `sentAt` 을 KST 로 해석 — 규격서 예시가 오프셋 없이 온다.
+      기억 시드는 `+09:00` 이라 섞이면 비교에서 `TypeError` 가 난다
+- [x] `Message.message_id` 추가 → `triggerMessageIds`
+- [x] `MemoryKind` 에 `schedule` 추가 (데이트 코스 명세의 "일정")
+- [x] 픽스처 8개를 규격서 요청 형식으로 변환 + `case9_date` `case10_concern` 추가
+
+**`Decision` 스키마는 없어졌다.** 후보는 `AiResult` 를 반환한다.
+
+### 말투 교정 — 출력 4필드로 확장
+
+- [x] `situation_diagnosis` 신설, 기존 `direction` → `correction_reason`
+- [x] `guideMessage` 는 고정 문구 → `worker/copy.py` 상수
+- [x] 대체 문장을 1~2문장(45자)으로 제한 — 복사 버튼이 없어서 외워서 쳐야 한다
+- [x] 진단 문구의 주어를 '표현·상황'으로 고정 (명세 예시는 '사람'이 주어였다)
+
+**룰 트리거와 개인 기준선은 그대로 뒀다.** 명세와 기존 구현이 일치했다.
+
+> **여기서 실제로 잡은 버그**: 일반화 화법 정규식의 `늘` 이 **"오늘"의 '늘'에 걸렸다.**
+> 채팅에서 "오늘"보다 흔한 단어가 없으니 상시 오발동이었다. 앞뒤에 한글 음절이 없는
+> 경우만 인정하도록 고쳤다. `만날` 은 아예 뺐다 — 경계를 잡아도 "토요일에 만날까"(만나다)와
+> "만날 늦어"(맨날)를 구분할 수 없다. 같은 뜻은 `맨날` 이 잡는다.
+
+### 데이트 코스 추천 — 신규
+
+- [x] 룰 트리거 4종 (`date_course.py`)
+- [x] `retrieve_many()` — 기억 여러 건 검색 (소재는 1건이면 됐지만 코스는 조합해야 한다)
+- [x] `plan_date()` → 카카오 로컬 검색 → `write_reason()`
+- [x] 카카오 클라이언트 (`places.py`) — `category_group_code` → 규격서 `category` 매핑
+
+**LLM 에게 상호명을 만들게 하지 않는다.** `externalUrl` 이 필수 필드라 환각이 그대로
+죽은 링크가 된다. LLM 은 검색어까지만 만들고 이름·URL 은 카카오가 준 것만 쓴다.
+
+적합도 스코어링 5개 중 ③영업시간 ④날씨·예산은 **데이터 소스가 없어 제외**했다.
+
+### 유튜브 영상 추천 — 신규
+
+- [x] 룰 프리필터 (`check_concern_gate`) — 고민 신호가 아예 없으면 LLM 을 부르지 않는다
+- [x] `classify_concern()` → 검색 + 베스트 댓글 → `pick_video()`
+- [x] YouTube API 클라이언트 (`ytapi.py`) — search / videos / commentThreads
+- [x] 댓글 비활성 영상 제외, 후보 전원 탈락 시 침묵
+- [x] 금지어가 든 **영상 제목**은 LLM 에 보이기 전에 제외
+
+### 배선
+
+- [x] `router.py` — 후보 3개를 돌려 `results` 배열 생성, 우선순위 순 정렬
+- [x] `SUPPRESS_YOUTUBE_WHEN_TONE` — 말투 교정이 뜬 요청에서는 영상 추천 보류
+- [x] `pipeline.analyze()` — `COMPLETED` / `SKIPPED` / `FAILED` 분기, 예외를 밖으로 안 던짐
+- [x] `filter.py` — 우리 생성물 + **외부에서 온 문자열**(영상 제목·설명)까지 검사
+- [x] CLI 재작성 — `--json` 으로 규격서 응답 그대로 출력
+
+### 검증 결과 (룰 게이트, LLM 없이)
+
+```
+case1_pingpong     tone=False date=True  concern=0
+case2_no_question  tone=False date=True  concern=0
+case3_one_sided    tone=False date=False concern=0
+case4_routine      tone=False date=False concern=0
+case5_busy         tone=False date=True  concern=1
+case6_stall        tone=False date=True  concern=1
+case7_tone         tone=True  date=False concern=3
+case8_banter       tone=True  date=False concern=0
+case9_date         tone=False date=True  concern=0
+case10_concern     tone=False date=False concern=3
+```
+
+LLM 실행 (`case7` / `case8`):
+
+```
+case7_tone     COMPLETED  TONE_CORRECTION  INDIVIDUAL → USER_A  trigger=[105]
+case8_banter   SKIPPED    · 맥락 판정 — 갈등이 아님 (장난)          ← 안전장치 유지
+case9_date     SKIPPED    · KAKAO_REST_API_KEY 없음
+case10_concern SKIPPED    · YOUTUBE_API_KEY 없음
+```
+
+---
+
+## 10단계 — 외부 API 연결 + 실측 ✅
+
+- [x] `KAKAO_REST_API_KEY` / `YOUTUBE_API_KEY` 발급 → `.env`
+- [x] `tools/check_keys.py` 추가 — 키 점검 (유튜브는 1 unit 짜리 호출로 검증)
+- [x] `case9_date` / `case10_concern` 실측, 후보 3종 전부 동작 확인
+- [x] `worker/llm.py` 에 토큰 계량기 — 유료는 OpenAI 뿐이라 매 실행 끝에 사용량을 찍는다
+
+**카카오 함정**: 키 발급만으로는 안 된다. 앱에서 **카카오맵 서비스를 켜야** 한다.
+안 켜면 `403 disabled OPEN_MAP_AND_LOCAL service` 가 뜬다. `check_keys` 가 이 경우
+해결 방법까지 출력한다.
+
+### 실측에서 잡은 것
+
+**① 지역 이탈** — "성수동 카페" 검색에 **건대 카페**가 나왔다. 카카오 정확도 정렬이 인접
+지역을 같이 준다. 주소 문자열 대조로 막았더니 이번엔 **서울숲이 걸러졌다**(주소가
+`성동구 뚝섬로`라 '성수'가 없다). **좌표 반경 2km 검색**으로 바꿔 둘 다 해결했다.
+`places.region_center()` 가 지역명을 좌표로 바꾸고 결과는 캐시된다.
+
+**② 검색어 형식** — `성수동 산책 코스` 가 0건. 카카오는 상호명·업종을 찾는 검색이라
+추상 명사와 수식어가 안 잡힌다. 좌표로 지역을 잡으므로 검색어에는 **업종 명사만**
+한두 단어로 쓰게 프롬프트를 고쳤다.
+
+**③ 근거가 날아가고 있었다** — `평양냉면` 으로 검색했는데 카카오가 고기집을 1위로 줬고,
+LLM 은 정직하게 "고기집"이라 쓰면서 **7월에 저장한 냉면 위시라는 근거를 통째로 버렸다.**
+추천 이유가 이 기능의 전부인데 그게 무너진다. 한국어 합성어는 뒤쪽이 업종이라는 점을 이용해
+(`평양냉면`→`냉면`) 업종이 맞는 결과를 우선하도록 `_fits_intent()` 를 넣었다.
+
+**④ 유튜브 안전장치 작동 확인** — 후보에 "연락 문제로 싸우는 커플은 무조건 헤어질 수밖에
+없다" 가 섞여 들어왔고, 댓글 검증 단계에서 걸러지고 심리상담사 영상이 선택됐다.
+
+### 비용
+
+카카오·유튜브는 **무료**(쿼터 초과 시 과금이 아니라 차단). 유료는 OpenAI 뿐이다.
+케이스 1건당 대략 LLM 3회 / 입력·출력 각 6천 토큰. `gpt-5` 라 추론 토큰이 출력에 잡혀
+**출력이 입력보다 많다** — 비용 대부분이 여기서 나온다.
+
+---
+
+## 11단계 — 남은 것 ⏸️
 
 ### 코드
 
-- [ ] **방향 문구 (a)/(b) 분기 여부 결정** — `emotion`이 `angry`/`irritated`면 감정 짚기를
-      우선하고, `hurt`/`calm`이면 표현 설명을 우선할지. 지금은 모델이 알아서 고른다.
-      `tone_suggest.md`에 한 문단 추가하면 되고 코드 변경은 없다
+- [ ] 후보 기능 병렬 실행 — 지금은 순차라 3개가 다 발동하면 느리다.
+      **타임아웃 기준이 정해진 뒤에 한다** (`docs/contract-review.md` 9번)
+- [ ] 유튜브 **채널 필터** 필요 여부 판단 — 명세에 "채널 선정은 필수적일 것"이라고 되어 있다.
+      1회 실측에서는 후보 5개가 모두 멀쩡했다. 몇 번 더 돌려보고 결정한다
+      (쿼터가 하루 94회라 마구 돌릴 수 없다)
+- [ ] HTTP 서버(FastAPI) — 규격 확정 후. `analyze()` 를 핸들러에 물리면 된다
 
-### 코드 작업 아님
+### 협의 — `docs/contract-review.md` 참조
 
-- [ ] `docs/contract-v2.md` 폐기, 새 계약서 작성 — 방 구조가 커플방 1개로 바뀌고 봇 출력이
-      메시지에서 위젯 페이로드로 바뀌었다. 채팅 서버 담당자와 재합의 필요
-- [ ] 서버 담당자에게 전달: 위젯은 **수신자별로 갈라서** 전송해야 한다.
-      방 단위 브로드캐스트만 하면 개별 코멘트가 양쪽에 다 뜬다
-- [ ] **프론트(민상)에게 전달: `Decision.kind` 필드 추가.** 후보 기능마다 화면 배치가 다르다
-
-  | `kind` | 중앙 (크게) | 보조 (작게) |
-  | --- | --- | --- |
-  | `topic` | `content` — 대화 소재 | `reason` — 근거 문구, **하단** |
-  | `tone` | `content` — 대체 문장 | `reason` — 방향 문구, **상단** |
-
-- [ ] **디자인(혜원)에게 전달**: 갈등 중재는 복사 버튼을 만들지 않는다 (명세 제약 사항)
-- [ ] PM(영환)에게 확인: 나머지 후보 기능 명세
+- [ ] 서버 담당자: 요청에 `recentResults` · `speakerProfiles` · `requestedAt` 추가 요청
+- [ ] 서버 담당자: `videoSummary` 필드 제거 제안(화면에서 빠짐), `category` enum 확정, 타임아웃 기준
+- [ ] 프론트(민상): 위젯 슬롯 1개인지, `results` 여러 개를 어떻게 배치할지
+- [ ] 디자인(혜원): 말투 교정은 복사 버튼을 만들지 않는다 (명세 제약 사항)
+- [ ] PM(영환): 감정 분석 기능 명세 (규격서 11장이 비어 있다)
+- [ ] PM(영환): 데이트 코스의 "핫플·트렌드" 탐색 방법 (명세에 미결로 남아 있음)

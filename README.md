@@ -1,9 +1,58 @@
 # kakapo AI 워커
 
-커플의 채팅을 분석해 **대화 소재를 제안하는 판정 엔진**. 채팅 데이터를 넣으면 개입 여부와 소재를 산출한다.
+커플의 채팅을 분석해 **개입을 산출하는 판정 엔진.** 채팅 데이터를 넣으면 어떤 기능을
+누구에게 보여줄지 판단하고, 백엔드 규격에 맞는 응답을 만든다.
 
-프로젝트 상시 맥락은 [`CLAUDE.md`](CLAUDE.md), 작업 지시는 [`docs/worker-tasks.md`](docs/worker-tasks.md)를 본다.
+| 문서 | 내용 |
+| --- | --- |
+| [`CLAUDE.md`](CLAUDE.md) | 프로젝트 상시 맥락 |
+| [`docs/contract-v1.md`](docs/contract-v1.md) | 백엔드 연동 규격 (팀 합의 사항) |
+| [`docs/contract-review.md`](docs/contract-review.md) | 규격서에 대한 워커 답변 + 확인 요청 |
+| [`docs/spec-v2.md`](docs/spec-v2.md) | PM 기능 명세 3종 |
+| [`docs/worker-tasks.md`](docs/worker-tasks.md) | 작업 지시 / 진행 상황 |
+
 이 문서는 **코드가 어떻게 생겼는지**만 설명한다.
+
+---
+
+## 빠른 시작
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+cp .env.example .env      # OPENAI_API_KEY 채우기 (나머지는 선택)
+
+.venv/bin/python -m tools.run fixtures/case7_tone.json --no-persist
+```
+
+```
+▸ case7_tone.json   status=COMPLETED
+
+  TONE_CORRECTION   INDIVIDUAL → USER_A   trigger=[105]
+    진단   지금 표현이 평소보다 세게 나갔어요
+    안내   대신 이렇게 상대방에게 말해보세요.
+    대체   "자기 오늘 못 온다니 좀 서운했어, 다음엔 미리 말해줘"
+    이유   '맨날'이 그동안 전부를 탓하는 말로 들려요
+```
+
+| 옵션 | 설명 |
+| --- | --- |
+| `--verbose` `-v` | 게이트 판정, 검색된 기억, 외부 API 결과 표시 |
+| `--no-persist` | `used_at`·기억 저장을 파일에 쓰지 않는다 (**반복 시연용**) |
+| `--json` | 백엔드에 나가는 규격서 응답을 그대로 출력 |
+
+여러 개를 한 번에 돌릴 수 있다: `.venv/bin/python -m tools.run fixtures/*.json --no-persist`
+
+### 외부 API 키
+
+없어도 돌아간다. **해당 기능만 조용히 미발동하고 워커는 죽지 않는다.**
+
+| 키 | 기능 | 없으면 |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | 전부 | 동작 불가 |
+| `KAKAO_REST_API_KEY` | 데이트 코스 | 미발동 |
+| `YOUTUBE_API_KEY` | 유튜브 추천 | 미발동 |
 
 ---
 
@@ -16,11 +65,9 @@
 
 그래서 **감지 로직과 발화 로직이 완전히 분리되어 있다.**
 
-- `gate.py` / `judge.py` / `tone.py` — 갈등·권태를 **감지**한다. 사용자에게 보여줄 문구는 만들지 않는다
-- `topic.py` — 소재를 **생성**한다. 왜 개입하는지는 모른다. 그냥 기억 하나를 자연스럽게 꺼낼 뿐이다
+- `tone.py` / `date_course.py` / `youtube.py` 의 게이트 — 갈등·의도를 **감지**한다
+- 프롬프트 — 문구를 **생성**한다. 왜 개입하는지는 모른다
 - `filter.py` — 그럼에도 금지어가 새어나오면 **문자열 검사로 막는다**
-
-프롬프트를 수정하거나 새 출력 문구를 만들 때 이 제약을 반드시 확인할 것.
 
 ### 헷갈리기 쉬운 경계
 
@@ -28,555 +75,192 @@
 
 | | 예시 | |
 | --- | --- | --- |
-| ❌ 관계 규정 | "요즘 대화가 줄었어요", "권태기", "사이가 서먹" | 모든 후보에서 금지 |
-| ✅ 감정 알아봄 | "지금 감정이 조금 올라와 있는 것 같아요" | **갈등 중재에서는 이게 기능이다** |
+| ❌ 관계 규정 | "요즘 대화가 줄었어요", "권태기", "사이가 서먹" | 모든 기능에서 금지 |
+| ✅ 감정 알아봄 | "지금 감정이 조금 올라와 있는 것 같아요" | **말투 교정에서는 이게 기능이다** |
 
-대화 소재는 "관찰당했다"는 티조차 내면 안 된다. 반면 갈등 중재는 지금 감정이 올라온 걸
-짚어주는 게 목적이고, 본인도 이미 아는 상태이며, 그 화면은 상대에게 보이지 않는다.
-
-갈등 중재에서도 **사람 자체는 평가하지 않는다.** "무례하시네요"는 안 되고,
+말투 교정에서도 **사람 자체는 평가하지 않는다.** "무례하시네요"는 안 되고,
 표현을 두고 "공격적으로 들릴 수 있어요"는 된다. 대상이 사람이면 안 되고 말이면 된다.
+이건 하드 필터가 아니라 프롬프트에서 다룬다 — 단어 목록으로는 두 경우를 구분할 수 없다.
+
+### 외부 문자열도 검사한다
+
+`filter.py` 는 **유튜브 영상 제목·설명까지** 검사한다. 우리가 쓴 문장이 아니어도
+"권태기 극복법" 이라는 제목이 위젯에 박히면 제약은 똑같이 깨진다.
+같은 이유로 `yt_concern.md` 는 검색어에 '권태기'를 쓰지 못하게 막는다.
 
 ---
 
-## 빠른 시작
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
-cp .env.example .env      # OPENAI_API_KEY 채우기
-
-.venv/bin/python -m tools.run fixtures/case3_one_sided.json --verbose --no-persist
-```
-
-출력:
+## 흐름
 
 ```
-▸ case3_one_sided.json
-  트리거   one_sided (한쪽만 발화)
-  scope    individual → A
-  소재     "5월 9일 지하철에서 졸다 종점까지 간 날, 기억나세요?"
-  근거     2026년 5월 9일에 두 분이 다녀오신 당일치기예요
+백엔드 요청 JSON
+   ↓
+pipeline.analyze()        요청 파싱 · 참여자 검증
+   ↓
+router.harvest_memories() 기억 추출 → 저장 (후보들보다 먼저 돈다)
+   ↓
+router.route()            후보 3개를 돌려 results 배열을 만든다
+   ↓
+filter                    금지어 하드 필터
+   ↓
+AnalysisResponse          COMPLETED / SKIPPED / FAILED
 ```
 
-갈등 중재 쪽은 이렇게 나온다.
+### LLM 과 외부 API 의 역할 분담 — 이 설계의 핵심
 
-```bash
-.venv/bin/python -m tools.run fixtures/case7_tone.json --verbose --no-persist
-```
-
-```
-▸ case7_tone.json
-  후보     tone (갈등 중재)
-  scope    individual → A          ← 보낸 사람에게만
-  방향     '맨날'은 지금 한 번이 아니라 그동안 전부로 들릴 수 있어요
-  대체문장 "오빠 오늘 못 온다니까 나 좀 서운했어, 다음엔 미리 말해줘"
-```
-
-### CLI 옵션
-
-| 옵션 | 설명 |
+| LLM | 외부 API |
 | --- | --- |
-| `--verbose` / `-v` | 게이트 판정, judge 결과, RAG 검색 top-3 표시 |
-| `--no-persist` | `used_at`·기억 저장을 파일에 쓰지 않는다. **반복 시연할 때 쓴다** |
+| 무엇을 찾을지, 왜 이것인지 | 실제로 무엇이 있는지 |
+| 검색어 · 지역 · 코스 의도 · 추천 이유 | 상호명 · 카테고리 · URL · 영상 ID · 썸네일 |
 
-`--no-persist` 없이 돌리면 소환한 기억에 `used_at`이 찍혀서 다음 실행 때 다른 소재가 나온다.
-시연 리허설은 `--no-persist`로 돌리는 게 안전하다.
-
-### 환경변수 (`.env`)
-
-| 키 | 기본값 | 설명 |
-| --- | --- | --- |
-| `OPENAI_API_KEY` | — | 필수 |
-| `KAKAPO_MODEL` | `openai:gpt-5` | `init_chat_model` 형식. 느리면 `openai:gpt-5-mini` |
-| `KAKAPO_TEMPERATURE` | `0.3` | 비우면 temperature 를 아예 안 넘긴다 |
-| `KAKAPO_EMBEDDING_MODEL` | `text-embedding-3-small` | 기억 임베딩용 |
+규격서에서 `externalUrl` · `videoId` · `thumbnailUrl` 이 전부 **필수** 필드다.
+LLM 이 "성수다락" 같은 상호를 지어내면 존재하지 않는 가게와 죽은 링크가 그대로 화면에 뜬다.
+**이름과 링크는 외부 API 가 준 것만 쓴다.** 이 원칙을 깨는 코드를 쓰지 말 것.
 
 ---
 
-## 파이프라인
+## 파일
 
-**위젯 슬롯은 1개다.** 후보 기능이 여러 개 발동해도 하나만 나간다.
-`router.py` 가 우선순위 순으로 시도하고, 먼저 결과를 내는 후보가 이긴다.
-
-```
-fixtures/case.json
-   ↓
-router.route()
-   │
-   ├─ 후보 1. 갈등 중재 (tone) ─ 갈등이 감지된 순간에 대화 소재를 던질 때가 아니다
-   │     check_tone_gate()   룰 — 공격·오해 유발 표현 6종
-   │        ↓ 걸리면
-   │     tone_judge()        LLM — 진짜 갈등인가, 맥락상 장난인가
-   │        ↓ 진짜면
-   │     tone_suggest()      LLM — 방향 문구 + 대체 문장
-   │        ↓ 장난이면 아래 후보로 내려감
-   │
-   └─ 후보 2. 대화 소재 (topic)
-         check_gate()        룰 — 트리거 ①②③⑤
-            ↓ needs_llm 이면
-         judge()             LLM — 트리거 ④, 바쁨 판별 + 기억 추출
-            ↓
-         retrieve()          RAG — 대화 맥락과 유사한 기억 검색
-            ↓
-         make_topic()        소재 생성 (기억 기반) 또는 오늘의 질문
-   ↓
-filter()      금지어 하드 필터 (후보별로 금지어 세트가 다르다)
-   ↓
-Decision      콘솔 출력
-```
-
-후보가 2개인 지금은 **우선순위 체인**으로 충분하다. CLAUDE.md 가 "정교한 스코어링 로직을
-구현하지 않는다"고 못박아 뒀다. 후보가 늘어 우선순위만으로 못 정하게 되면 그때 점수 기반으로 바꾼다.
-LangGraph 는 쓰지 않는다.
-
----
-
-## 모듈별 설명
-
-### `worker/models.py` — 스키마
-
-Pydantic 모델 전부. LLM 을 태우지 않는다.
-
-| 모델 | 용도 |
+| 파일 | 역할 |
 | --- | --- |
-| `Message` / `Fixture` | 입력. `Fixture`는 `now`(⑤ 판정 기준 시각), `online`(접속 중인 사람)을 갖는다 |
-| `Decision` | **최종 출력.** `kind` / `scope` / `target` / `content` / `reason` |
-| `SpeakerProfile` | 개인별 평소 말투 기준선 |
-| `ToneGateResult` / `ToneFlag` | 말투 룰 트리거 결과 |
-| `Memory` | 기억 1건. `kind` 5종, `used_at` 이 "미소환 우선"과 "30일 중복 금지"를 동시에 처리 |
-| `GateResult` | 룰 게이트 판정 결과 |
-| `JudgeResult` | LLM 판정 결과 |
-| `ExtractedMemory` / `JudgeLLMOutput` / `TopicLLMOutput` | **LLM 구조화 출력 전용** |
+| `models.py` | 규격서 DTO + 내부 스키마. camelCase 직렬화 |
+| `pipeline.py` | 요청 파싱 → 응답 생성. 예외를 밖으로 던지지 않는다 |
+| `router.py` | 후보 기능 실행, `results` 배열 조립 |
+| `filter.py` | 금지어 하드 필터 |
+| `llm.py` | LLM 접근 레이어 — 모든 호출이 여기를 거친다 |
+| `text.py` | 한국어 문장 판별 (`is_reaction` / `is_question` / 대화 로그 포맷) |
+| `copy.py` | 화면 고정 문구 (`guideMessage`). PM·디자인 소유 |
+| `extract.py` | 기억 추출 — 모든 후보가 공유 |
+| `retrieve.py` | RAG 기억 검색 |
+| `tone.py` / `profile.py` | [1] 갈등 중재 — 룰 트리거 + 개인 말투 기준선 |
+| `date_course.py` / `places.py` | [2] 데이트 코스 + 카카오 로컬 API |
+| `youtube.py` / `ytapi.py` | [3] 유튜브 추천 + YouTube Data API |
 
-`*LLMOutput` 이 따로 있는 이유: strict json_schema 모드가 nullable·date-time 을 잘 못 다룬다.
-LLM 에는 sentinel 문자열(`"none"` / `"unknown"`)과 id·시각 없는 형태로 받고,
-`JudgeLLMOutput.to_result()` 가 명세 스키마로 변환한다.
+`parked/` 는 파킹된 대화 소재 기능이다. **파이썬 패키지가 아니고 import 되지 않는다.**
+복구 방법은 [`parked/README.md`](parked/README.md).
 
-**`Decision.kind` 는 프론트 렌더링 계약이다.** 후보 기능마다 화면 배치가 다르다.
+---
 
-| `kind` | 중앙 (크게) | 보조 (작게) |
-| --- | --- | --- |
-| `topic` | `content` — 대화 소재 | `reason` — 근거 문구, **하단** |
-| `tone` | `content` — 대체 문장 | `reason` — 방향 문구, **상단** |
+## 후보 기능 3종
 
-기본값이 `"topic"` 이라 기존 계약은 깨지지 않는다.
+후보는 `build(ctx) -> AiResult | None` 을 구현한다. `None` 은 "발동하지 않음"이다.
+규격서가 여러 기능 동시 발동을 허용하므로 **앞 후보가 뒤를 막지 않는다.**
 
-### `worker/gate.py` — 룰 게이트
+### 1. 갈등 중재 — 말투 교정 (`TONE_CORRECTION`)
 
-**LLM 을 전혀 쓰지 않는다.** 정규식과 통계뿐이다.
+**방금 전송된 메시지 하나**를 본다. 보낸 사람에게만 간다.
 
-```python
-check_gate(messages, now=..., online=[...]) -> GateResult
+```
+check_tone_gate()  룰 — 6종 신호. 확정하지 않고 후보만 잡는다
+tone_judge()       LLM — 진짜 갈등인가, 맥락상 장난인가
+tone_suggest()     LLM — 진단 + 대체 문장 + 이유
 ```
 
-판정 순서 (앞에서 걸리면 거기서 끝):
+LLM 호출을 둘로 나눈 이유: 최대 리스크는 **장난을 갈등으로 오인하는 것**이다.
+판정 프롬프트를 판정에만 집중시키고, 통과한 경우에만 생성한다.
+대부분 판정에서 걸러지므로 호출 비용도 오히려 줄어든다.
 
-| 순서 | 트리거 | 조건 |
-| --- | --- | --- |
-| 0 | **바쁨 표현** | "회의", "이따 톡", "바빠" 등 감지 → `needs_llm=True`. **룰로 확정하지 않는다** |
-| 1 | ① `short_pingpong` | 종료형 단답 3턴 연속 |
-| 2 | ③ `one_sided` | 발화 비중 75% 이상 + 반대쪽은 리액션만 (80% 이상) |
-| 3 | ② `no_question` | 최근 6개 메시지에 되묻는 문장 0개 |
-| 4 | ⑤ `stall` | 마지막 메시지 후 20분 경과 + 양쪽 접속 중 |
-| 5 | ④ 후보 | 날짜별 어휘 겹침(Jaccard) 30% 이상 → `needs_llm=True` |
+**개인별 평소 말투 기준선이 핵심이다.** 특정 단어를 절대 기준으로 잡지 않고
+그 사람의 평소 대비 변화량으로 판정한다 — 마침표율, 호칭, 평균 길이, ㅋ 개수, 이모지 빈도.
+시드는 `data/speaker_profiles.json`, 계산은 `profile.py`.
 
-**톤 판정은 전부 화자 개인 베이스라인 대비다.** `_baselines()` 가 최근 윈도우를 제외한 앞부분에서
-화자별 평소 발화 길이를 잡고, 거기에 못 미치면 "짧아졌다"고 본다.
-원래 단답형인 사람에게 절대 기준을 적용하면 상시 트리거되기 때문이다.
+`abrupt_change`(평소 대비 급변)는 **약한 증거다.** 다른 신호와 함께일 때만 세고,
+혼자서는 하위 신호 3개 이상일 때만 인정한다. 이 제한이 없으면 평범한 단답이 전부 걸린다.
 
-`decide_scope()` 는 발화량 비율로 노출 대상을 정한다. LLM 호출 불필요.
+**대체 문장은 1~2문장(45자 이내).** 복사 버튼이 없어서 보고 직접 타이핑해야 한다.
+나 전달법 4요소(상황·영향·감정·바람)를 다 넣으면 외워서 칠 수 없는 길이가 된다.
 
-| 조건 | scope | target |
-| --- | --- | --- |
-| 양쪽 다 단답 70% 이상 | `common` | — |
-| 한쪽 발화 70% 이상 | `individual` | 말 거는 쪽 |
-| 한쪽 단답 70% 이상 | `individual` | 단답 보내는 쪽 |
+### 2. 데이트 코스 추천 (`DATE_RECOMMENDATION`)
 
-주요 상수 — 튜닝은 여기서 한다:
-
-```python
-WINDOW = 6                      # 판정 윈도우 (메시지 개수)
-PINGPONG_STREAK = 3             # ① 연속 단답 임계
-ONE_SIDED_CHAR_RATIO = 0.75     # ③ 발화 비중
-ONE_SIDED_REACTION_RATIO = 0.8  # ③ 반대쪽 리액션 비율
-SCOPE_TALK_RATIO = 0.70         # scope 결정
-SCOPE_SHORT_RATIO = 0.70
-STALL_AFTER = timedelta(minutes=20)
-ROUTINE_JACCARD = 0.30          # ④ 후보 판정
+```
+check_date_gate()  룰 — 데이트 의도 4종
+retrieve_many()    RAG — 맥락과 유사한 기억 여러 건
+plan_date()        LLM — 지역 + 검색어 + 코스 의도 (장소를 지어내지 않는다)
+build_course()     카카오 로컬 — 실재하는 장소로 코스를 채운다
+write_reason()     LLM — 확정된 상호를 보고 코스명·요약·추천 이유
 ```
 
-### `worker/llm.py` — LLM 접근 레이어
+LLM 호출을 둘로 나눈 이유: 계획 시점에는 **어떤 가게가 잡힐지 모른다.** 카카오가 준
+실제 상호를 보고 나서 문구를 써야 "성수다락에서 브런치 먹고" 같은 문장이 나온다.
 
-**모든 LLM 호출은 여기를 거친다.** `import openai` 직접 호출은 금지 (트레이싱 일관성).
+`recommendationReason` 이 이 기능의 전부다 — "지난주에 마라탕 땡긴다고 하셨던 거
+기억하고 골라봤어요". 근거에 없는 발화를 지어내면 사용자가 바로 알아챈다.
 
-```python
-ask(schema, system, user) -> schema   # 구조화 출력 단발 호출
-load_prompt("judge") -> str           # worker/prompts/judge.md 를 읽는다
+명세의 적합도 스코어링 5개 중 ①과거 기억 ②현재 스트림 ⑤취향만 구현했다.
+③영업시간은 카카오가 주지 않고(크롤링 영역), ④날씨·예산은 데이터 소스가 없다.
+
+### 3. 유튜브 영상 추천 (`YOUTUBE_RECOMMENDATION`)
+
+```
+check_concern_gate() 룰 프리필터 — 고민 신호가 아예 없으면 LLM 을 부르지 않는다
+classify_concern()   LLM — 고민 유형 특정 + 한국어 검색어
+find_candidates()    YouTube API — 영상 + 베스트 댓글 3개
+pick_video()         LLM — 댓글까지 읽고 1개 선정. 없으면 -1 (침묵)
 ```
 
-- `init_chat_model` + `with_structured_output(schema, method="json_schema", strict=True)`
-- 툴 루프가 없는 단발 분류/생성이라 `create_agent` 를 쓰지 않는다. 레이턴시와 비용만 늘어난다
-- reasoning 계열 모델이 `temperature` 를 거부하면 한 번 재시도한다
+**제목·썸네일만으로 고르지 않는다.** 연애 유튜브는 제목이 자극적이고 내용이 딴판이라,
+제목만 믿으면 화해하고 싶은 사람에게 "이런 남자는 걸러라" 영상을 던지게 된다.
+**댓글이 영상의 실제 결론을 알려준다.**
 
-### `worker/judge.py` — LLM 판정
+**침묵이 기본값이다.** 후보 전원이 부적합하면 아무것도 내보내지 않는다.
+댓글이 꺼진 영상은 맥락 검증을 못 하므로 후보에서 제외한다.
 
-룰로 확정 못 한 케이스(`needs_llm=True`)만 온다. **감지만 하고 문구는 만들지 않는다.**
+룰 프리필터를 둔 이유: 명세대로 판정은 LLM 이 하되, 갈등·고민의 흔적이 전혀 없는
+평범한 잡담에까지 분류 호출을 날리지 않기 위해서다.
 
-```python
-judge(messages) -> JudgeResult
+---
+
+## 기억 저장소 + RAG
+
+데이트 코스 추천의 근거다. 없으면 "왜 이 장소인지"를 말할 수 없다.
+
+```
+대화: "아 배고파... 뭐 먹지"
+
+최신순 조회  → "작년에 갔던 방탈출"              (맥락 무관)
+유사도 검색  → "먹고 싶다던 연남동 크림파스타집"   (맥락 연결)
 ```
 
-- 트리거 ④(일상 보고형 반복) 판정
-- 바쁨이 진짜인지 핑계인지 구분
-- **기억 추출을 같은 호출에서 함께 한다.** 별도 배치 파이프라인을 만들지 않는다
-- 룰이 못 정한 경우에만 scope 판정
-
-`format_transcript()` 는 날짜가 바뀌면 `--- 2026-08-13 ---` 구분선을 넣는다. 반복 패턴을 모델이 보기 쉽게 하려는 것.
-
-**지어낸 기억은 버린다.** `source_quote` 가 원문에 실제로 없으면 저장하지 않는다.
-
-프롬프트는 [`worker/prompts/judge.md`](worker/prompts/judge.md).
-
-### `worker/retrieve.py` — RAG 기억 검색
-
-```python
-recent_context(messages, n=6) -> str   # 검색 질의 생성
-search(query, k=3) -> list[Memory]     # 유사도 상위 k건 (디버깅용)
-retrieve(recent, k=3) -> Memory | None # 쓸 수 있는 기억 1건
-mark_used(memory_id)                   # used_at 기록
-save_memories(new)                     # judge 가 뽑은 기억 저장 (id 중복 무시)
-```
-
-`OpenAIEmbeddings` + `InMemoryVectorStore`. 기억이 30건 안쪽이라 pgvector·Chroma 를 띄우지 않는다.
+`OpenAIEmbeddings` + `InMemoryVectorStore`. 기억이 27건 규모라 pgvector 를 띄우지 않는다.
 프로세스 시작 시 `data/memories.json` 을 한 번 인덱싱한다.
 
-**주의할 지점 두 개:**
-
-1. **`recent_context()` 는 리액션을 제외한다.** 트리거가 걸리는 대화는 끝부분이 `ㅇㅇ 응 그래`로
-   채워져 있어서, 단순히 마지막 6개를 쓰면 질의가 `"다음에 같이 가자 ㅇㅇ 응 그래 ㅇㅇ"` 가 되고
-   검색이 통째로 헛돈다. 내용이 있는 발화만 모은다
-
-2. **임베딩 대상은 `content + source_quote` 다.** `content` 만 넣으면 맥락 매칭이 약하다
-
-선택 규칙: 유사도 상위 k건 중 `used_at is None` 인 것 우선 → 전부 소환됐으면 30일 지난 것만 재사용 → 없으면 `None`(오늘의 질문 폴백).
-
-### `worker/topic.py` — 소재 산출
-
-```python
-make_topic(memory, scope, target, recent=None) -> Decision  # LLM 호출 O
-daily_question(scope, target, now=None) -> Decision          # LLM 호출 X
-```
-
-**우선순위 1 — 기억 기반.** LLM 이 원문·시점을 살려 문장을 만든다. `content` + `reason` 둘 다 생성.
-
-**우선순위 2 — 오늘의 질문.** `data/daily_questions.json` 30개에서 고른다. **LLM 호출 없음, 즉시 응답.**
-`reason` 은 `None` — 기억이 없어 대체한 것이므로 근거 문구를 생략한다.
-
-질문 선택 규칙:
-1. 30일 내 사용한 것 제외
-2. 현재 시간대(`morning` / `afternoon` / `evening` / `late_night`)에 맞는 것
-3. `heavy`(감정·관계 질문) 후순위, **심야에는 아예 제외**
-
-프롬프트는 [`worker/prompts/topic.md`](worker/prompts/topic.md).
-
-### `worker/filter.py` — 금지어 하드 필터
-
-```python
-find_banned(text) -> str | None   # 걸린 금지어
-is_clean(decision) -> bool
-apply_filter(decision, regenerate=None, fallback=None) -> Decision
-```
-
-**문자열 검사로 강제한다. LLM 판단에 맡기지 않는다.** 프롬프트에도 금지 지시를 넣지만 그것만 믿지 않는다.
-
-```python
-BANNED = ["권태기", "대화가 줄", "서먹", "사이가", "요즘 뜸", "소원해",
-          "멀어지", "데면데면", "예전보다", "요즘 들어", ...]
-```
-
-**금지어 세트는 후보와 무관하게 하나다.** 절대 제약이 "관계 상태 언급 금지" 하나이기 때문이다.
-
-> **갈등 중재에서 감정 상태를 언급하는 것은 금지가 아니다.**
-> 절대 제약의 근거는 "너네 권태기다" 같은 **관계 규정**을 들으면 의식이 심해진다는 것이고,
-> 그건 대화 소재 쪽 얘기다. 갈등 중재는 지금 감정이 올라온 걸 짚어주는 게 기능의 목적이다.
-> `"지금 감정이 올라와 있는 것 같아요"` 는 통과하고, `"요즘 두 분 사이가"` 는 여기서도 막힌다.
-
-사람을 평가하는 표현("무례하시네요")은 하드 필터가 아니라 프롬프트에서 다룬다.
-단어 목록으로는 `"공격적으로 들릴 수 있어요"`(정상)와 `"공격적이시네요"`(문제)를 구분할 수 없다.
-
-폴백 규칙은 후보마다 다르다.
-
-| kind | 걸렸을 때 |
+| kind | 의미 |
 | --- | --- |
-| `topic` | 1회 재생성 → 또 걸리면 오늘의 질문으로 폴백 → 그것도 걸리면 예외 |
-| `tone` | 1회 재생성 → 또 걸리면 **아무것도 내보내지 않는다** |
+| `place` | 함께 간 장소 |
+| `activity` | 함께 한 활동 |
+| `promise` | 지키지 못한 약속 |
+| `wish` | 저장만 하고 안 쓴 위시 |
+| `interest` | 두 사람의 관심사 |
+| `schedule` | 만나기로 한 시점 (데이트 코스 명세의 "일정") |
 
-`tone` 에서 오늘의 질문으로 폴백하면 맥락이 완전히 어긋난다. 싸우는 중에 "요즘 듣는 노래 있어요?"가
-뜨는 셈이다. 절대 제약이 응답 가용성보다 우선이라고 판단했다.
+`used_at` 이 "미소환 우선"과 "30일 내 중복 금지"를 동시에 처리한다.
 
-### `worker/profile.py` — 개인 말투 기준선
+### 검색 질의를 만드는 방법이 중요하다
 
-```python
-resolve_profile(speaker, messages) -> SpeakerProfile
-compute_profile(messages, speaker) -> SpeakerProfile   # 대화에서 직접 계산
-addresses_in(text) -> list[str]                        # 문장에 등장한 호칭
-describe(profile) -> str                               # 프롬프트에 넣을 요약
-```
+`recent_context()` 는 **리액션을 제외하고 내용이 있는 발화만** 모은다.
+그냥 마지막 6개를 쓰면 질의가 `"ㅇㅇ 응 그래 ㅇㅇ"` 가 되고 검색이 통째로 헛돈다.
 
-**말투 교정은 절대 기준으로 판정하면 안 된다.** 평소 "ㅇㅇ"만 보내는 사람의 "ㅇㅇ"은 무례가 아니고,
-원래 호칭이 "야"인 커플에게 "야"는 호칭 변화가 아니다. 특정 단어가 아니라 **그 사람의 평소 대비 변화량**을 본다.
+### 기억 추출
 
-측정 항목: 평균 길이 / 마침표 종결 비율 / 메시지당 ㅋ·ㅎ 개수 / 이모지 사용률 / 평소 호칭 상위 2개 /
-갈등 시 어휘 패턴(`conflict_style`, 시드에서만 제공).
+별도 배치를 만들지 않는다. **분석 요청마다 `extract.py` 가 한 번 같이 돈다.**
+후보들보다 먼저 돌아서, 방금 "마라탕 땡긴다"고 한 발화가 같은 요청의 추천에 바로 반영된다.
 
-`data/speaker_profiles.json` 시드가 있으면 그것을, 없으면 대화에서 계산한다.
-시드가 필요한 이유는 기억 시드와 같다 — 픽스처 하나로는 "평소 ㅋ 3개 → 이번엔 0개" 같은 대비를 만들 수 없다.
+**원문에 실제로 존재하는 인용만 저장한다.** 지어낸 기억은 나중에 추천 이유로 화면에
+그대로 나간다.
 
-**`addresses_in()` 주의**: 부분 문자열로 찾으면 "거야"의 '야', "너무"의 '너'까지 호칭으로 잡힌다.
-어절 단위로 보고 뒤에 조사만 붙은 경우까지만 인정한다.
+---
 
-### `worker/tone.py` — 갈등 중재 (말투 교정 제안)
+## 픽스처
 
-```python
-check_tone_gate(messages, profile=None) -> ToneGateResult   # 룰, LLM 없음
-tone_judge(messages, gate, profile) -> ToneJudgeLLMOutput   # 맥락 판정
-tone_suggest(messages, gate, profile, judged) -> ToneSuggestLLMOutput
-```
+`fixtures/*.json` 은 **규격서 5장의 공통 분석 요청 형식 그대로**다.
+서버가 보낼 페이로드와 같은 것을 넣고 있으므로, 여기서 통과하면 DTO 는 맞춰진 것이다.
 
-기존 트리거(①~⑤)가 "대화 흐름"을 보는 것과 달리 **방금 전송된 메시지 하나**를 본다.
-
-룰 트리거 6종:
-
-| kind | 내용 |
+| 케이스 | 무엇을 보나 |
 | --- | --- |
-| `insult` | 인신공격 · 욕설 |
-| `generalization` | 일반화 화법 ("넌 늘 그런 식이야", "한 번을") |
-| `sarcasm` | 비꼼 · 반어 ("잘한다 ㅋㅋ") |
-| `address_change` | 호칭 변화 (평소 '오빠' → '야') |
-| `repetition` | 비슷한 말 반복 ("전화 받아" → "받아" → "받으라고") |
-| `abrupt_change` | 평소 대비 급변 (마침표 종결 / ㅋ 사라짐 / 길이 급변 / 이모지 사라짐) |
+| `case1`~`case6` | 파킹된 대화 소재용. 지금은 회귀 확인용 (말투 게이트 미발동) |
+| `case7_tone` | 갈등 중재 — 공격 표현 감지 |
+| `case8_banter` | **안전장치** — 비속 표현이지만 장난이면 침묵 |
+| `case9_date` | 데이트 코스 — 일정 확정 + 계획 질문 + 지역 언급 |
+| `case10_concern` | 유튜브 — 반복 갈등 + 사과 방법 모름 |
 
-**`abrupt_change` 는 약한 증거다.** 단답 핑퐁이나 대화가 잦아든 상황에서도 그대로 걸린다.
-다른 신호와 함께일 때만 세고, 혼자서는 하위 신호 3개 이상(`ABRUPT_ALONE_SIGNALS`)일 때만 인정한다.
-이 제한이 없으면 기존 `case1`~`case6` 이 전부 말투 교정에 가로채인다.
-
-**판정과 생성을 따로 호출하는 이유**: 이 기능의 최대 리스크는 "와 미친 ㅋㅋ" 같은 장난을 갈등으로
-오인하는 것이다. 판정 프롬프트를 판정에만 집중시키고, 통과한 경우에만 생성한다.
-대부분의 메시지는 판정에서 걸러지므로 호출 비용도 오히려 줄어든다.
-
-프롬프트는 [`tone_judge.md`](worker/prompts/tone_judge.md) / [`tone_suggest.md`](worker/prompts/tone_suggest.md).
-대체 문장은 **나 전달법**(상황 / 영향 / 감정 / 바람)으로 쓴다. 주어를 '너'에서 '나'로 바꿔 행동과 감정만 남긴다.
-
-> **화면에 복사 버튼을 만들지 않는다.** 직접 보고 타이핑해야 의미가 있다는 판단이라
-> 대체 문장은 짧고 외우기 쉬워야 한다. 프롬프트에 명시되어 있다.
-
-### `worker/router.py` — 개입 방향 결정
-
-```python
-route(ctx: Context) -> Decision | None
-CANDIDATES = [ToneCandidate(), TopicCandidate()]   # 우선순위 순
-```
-
-후보를 순서대로 시도하고, 먼저 결과를 내는 후보가 이긴다.
-후보가 `None` 을 돌려주면 다음 후보로 내려간다 — 말투 게이트가 걸렸지만 LLM 이 "장난"으로 판정하면
-대화 소재 후보로 넘어가는 식이다.
-
-후보를 추가하려면 `build(ctx) -> Decision | None` 을 구현해 `CANDIDATES` 에 끼우면 된다.
-
-### `worker/pipeline.py` — 조립
-
-```python
-run(fixture: dict) -> Decision | None
-run_traced(fixture, persist=True) -> (Decision | None, Trace)
-```
-
-픽스처를 읽어 `Context` 를 만들고 라우터에 넘기는 얇은 층이다. 후보별 로직은 `router.py` 에 있다.
-
-`Trace` 는 `--verbose` 용 중간 기록(말투 게이트·판정, 대화 게이트·judge, RAG top-3, 소재 출처)이다.
-판정에는 관여하지 않는다.
-
-### `tools/run.py` — CLI 러너
-
-픽스처 경로를 인자로 받아 실행하고 사람이 읽기 좋게 출력한다. 여러 개를 한 번에 넘길 수 있다.
-
----
-
-## 데이터
-
-### `data/memories.json` — 기억 시드 (27건)
-
-```json
-{
-  "id": "m01",
-  "kind": "place",
-  "content": "성수동 카페 오르에르",
-  "source_quote": "여기 분위기 진짜 좋다 다음에 또 오자",
-  "occurred_at": "2025-10-14T15:20:00+09:00",
-  "used_at": null
-}
-```
-
-| kind | 의미 | 건수 |
-| --- | --- | --- |
-| `place` | 함께 간 장소 | 6 |
-| `activity` | 함께 한 활동 | 6 |
-| `promise` | 지키지 못한 약속 | 5 |
-| `wish` | 저장만 하고 안 쓴 위시 | 5 |
-| `interest` | 두 사람의 관심사 | 5 |
-
-**시드가 필수다.** 실시간 추출만으로는 데모 시작 시점에 기억이 0건이라 오늘의 질문만 나온다.
-`m02` 는 `used_at` 이 찍혀 있어 소환 메커니즘을 시연에서 보여준다.
-
-### `data/daily_questions.json` — 오늘의 질문 풀 (30개)
-
-```json
-{"id": "q01", "text": "...", "time_tags": ["evening", "late_night"], "heavy": false, "used_at": null}
-```
-
-`time_tags` 는 `morning` / `afternoon` / `evening` / `late_night` / `any`.
-`heavy: true` 는 감정·관계 질문으로 후순위이며 심야에는 제외된다.
-
-**의도적으로 LLM 생성이 아니다.** 폴백 경로라 즉시 응답해야 하고, 사람이 검수한 고정 풀이어야
-"폴백의 폴백" 문제(금지어 필터에 또 걸리는 것)가 원천적으로 없다.
-
-### `fixtures/` — 시연용 입력 대화
-
-```json
-{
-  "room_id": "r1",
-  "now": "2026-08-14T22:41:00+09:00",
-  "online": ["A", "B"],
-  "messages": [
-    {"sender": "A", "content": "오늘 뭐했어?", "ts": "2026-08-14T21:03:00+09:00"}
-  ]
-}
-```
-
-`sender` 는 `"A"` / `"B"` 만 받는다.
-`now` 는 ⑤(20분 정체) 판정 기준 시각이다. 없으면 "마지막 메시지 + 1분"(= 정체 아님)으로 본다.
-실행 시각에 따라 결과가 바뀌지 않게 하려고 픽스처에 박아둔다.
-
-| 파일 | 패턴 | 기대 결과 |
-| --- | --- | --- |
-| `case1_pingpong.json` | 단답 핑퐁 | `short_pingpong` / `common` |
-| `case2_no_question.json` | 질문 없는 대답 | `no_question` / `individual` → A |
-| `case3_one_sided.json` | 한쪽만 발화 | `one_sided` / `individual` → A |
-| `case4_routine.json` | 일상 보고 반복 (LLM 필요) | `routine_loop` / `common` |
-| `case5_busy.json` | 바쁨 표현 있음 | **개입하지 않음** |
-| `case6_stall.json` | 20분 정체 | `stall` / `common` |
-| `case7_tone.json` | 일반화 + 호칭 변화 + 말투 급변 | `tone` / `individual` → A |
-| `case8_banter.json` | "야 이 바보야 ㅋㅋ" (장난) | **개입하지 않음** ← 예외 처리 |
-
-`case8` 이 이 기능의 안전장치다. 비속 표현이 있어도 맥락상 장난이면 개입하지 않아야 한다.
-여기서 잔소리가 뜨면 사용자는 앱을 지운다.
-
-### `data/speaker_profiles.json` — 개인 말투 기준선 시드
-
-```json
-{
-  "speaker": "A",
-  "avg_length": 21.0,
-  "period_rate": 0.03,
-  "laugh_per_msg": 2.8,
-  "emoji_rate": 0.35,
-  "top_address": ["오빠", "자기"],
-  "conflict_style": "화가 나면 문장이 짧아지고 평소 안 쓰던 마침표를 찍는다"
-}
-```
-
-`conflict_style` 은 계산으로 뽑을 수 없어 시드에만 있다. LLM 판정에 그대로 넘어가며,
-실제로 `case8` 에서 "B의 화난 패턴(존댓말·말수 증가)과 불일치해 장난으로 보임" 이라는 근거로 쓰였다.
-
----
-
-## 기술 스택
-
-- Python 3.11+
-- **LangChain 1.x** — `langchain`, `langchain-openai`
-- `numpy` — `InMemoryVectorStore` 의 cosine similarity 계산에 필요
-
-### LangChain 을 쓴 곳은 2개 파일뿐이다
-
-```
-worker/llm.py       init_chat_model + with_structured_output
-worker/retrieve.py  OpenAIEmbeddings + InMemoryVectorStore
-```
-
-나머지(`gate` / `filter` / `topic` 의 오늘의 질문 / `pipeline`)는 전부 순수 파이썬이다.
-LangChain 은 OpenAI 를 부르는 어댑터로만 쓰고, 판정 품질을 만드는 로직은 직접 짠 코드다.
-
-### 금지 사항
-
-- ❌ `langchain-classic` 설치
-- ❌ `LLMChain`, `initialize_agent`, `AgentType`, `ConversationBufferMemory` 등 0.x 레거시 API
-- ❌ `create_agent` — judge 는 툴 루프가 없는 단발 분류다
-- ❌ `import openai` 직접 호출 — 모든 LLM 호출은 `worker/llm.py` 를 거친다
-- ⏸️ `langgraph` — 분기가 3개뿐이라 `if` 로 충분하다
-
-인터넷에서 찾은 LangChain 예제 대부분은 0.x 기준이다. 참고 전에 위 목록에 걸리는지 확인할 것.
-
----
-
-## 구현하지 않은 것
-
-MVP 범위 밖이다. **필요해 보여도 사용자에게 먼저 확인할 것.**
-
-| | 지금 (MVP) | 후속 |
-| --- | --- | --- |
-| 입력 | `fixtures/*.json` | Redis 큐 |
-| 기억 저장 | `data/memories.json` | Postgres |
-| 출력 | 콘솔 | 채팅 서버로 POST |
-| 배선 | 함수 호출 | LangGraph `StateGraph` |
-
-- **회신 API (`/internal/widget`)** — 기존 `docs/contract-v2.md` 는 방 구조가 바뀌면서 폐기됐다.
-  채팅 서버 담당자와 재합의가 필요하다
-- **트리거 ⑥ 장기 신호** — 6주치 데이터가 필요해 해커톤 시연에서 재현 불가. 관련 통계 수집 코드도 넣지 않았다
-- **점수 기반 스코어링** — 후보가 2개(갈등 중재 / 대화 소재)뿐이라 `router.py` 는 우선순위 체인이다.
-  후보가 늘어 우선순위만으로 못 정하게 되면 그때 점수 기반으로 바꾼다
-
----
-
-## 서버 담당자에게 전달할 것
-
-**위젯은 수신자별로 갈라서 전송해야 한다.**
-
-`Decision.scope` 가 `individual` 이면 `target` 인 사람에게만 보낸다.
-방 단위 브로드캐스트만 하면 개별 코멘트가 양쪽에 다 뜬다.
-
-B 에게 개별 코멘트가 갔을 때 A 는 그런 게 떴다는 사실 자체를 몰라야 한다.
-지적성 피드백이 상대에게 노출되면 그 자체가 갈등 소재가 되기 때문이다.
-
-**갈등 중재(`kind="tone"`)는 이게 더 중요하다.** 말투 교정 제안이 상대에게 보이면
-그 순간 싸움이 커진다. `scope` 는 항상 `individual` 이고 `target` 은 그 말을 **보낸 사람**이다.
-
-## 프론트 담당자에게 전달할 것
-
-**`Decision.kind` 로 렌더링 레이아웃을 갈라야 한다.** 위 [스키마 절](#workermodelspy--스키마) 참조.
-`tone` 은 보조 문구(`reason`)가 본문 **위**에 온다.
-
-**갈등 중재 화면에는 복사 버튼을 만들지 않는다.** 명세의 제약 사항이다 —
-직접 보고 타이핑해야 의미가 있다는 판단이다.
-
----
-
-## 비용
-
-gpt-5 기준 LLM 호출 1회 약 $0.009. 비용의 90%는 내부 추론 토큰이다.
-임베딩(`text-embedding-3-small`)은 $0.02/1M 토큰이라 사실상 무시해도 된다.
-
-| 상황 | 호출 |
-| --- | --- |
-| 룰 게이트에서 끝남 (개입 안 함) | 0회 — 임베딩도 안 탄다 |
-| 대화 소재, 룰 트리거 | 1회 (소재 생성) |
-| 대화 소재, LLM 판정 필요 | 2회 (judge + 소재 생성) |
-| 갈등 중재, 장난으로 판정 | 1회 (판정) → 대화 소재 후보로 내려감 |
-| 갈등 중재, 진짜 갈등 | 2회 (판정 + 생성) |
-
-픽스처 8개 전체 실행 1회에 약 $0.08.
-
-비용의 90%는 gpt-5 의 내부 추론 토큰이다. 부담되면 `.env` 에서 `KAKAPO_MODEL=openai:gpt-5-mini` 로
-바꾸면 코드 수정 없이 적용되고 체감 속도도 빨라진다.
-
-이 워커는 무한 루프가 없다. `python -m tools.run` 한 번 = 호출 몇 번 하고 종료다.
+`case7` 과 `case8` 을 붙여서 돌리면 감지가 어휘 필터가 아니라 맥락 판정이라는 게 보인다.

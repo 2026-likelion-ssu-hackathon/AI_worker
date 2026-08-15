@@ -17,8 +17,8 @@ from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import OpenAIEmbeddings
 
 from worker import DATA_DIR
-from worker.gate import is_reaction
 from worker.models import Memory, Message
+from worker.text import is_reaction
 
 MEMORY_FILE = DATA_DIR / "memories.json"
 
@@ -104,7 +104,7 @@ def recent_context(messages: list[Message], n: int = 6) -> str:
     트리거가 걸리는 대화는 끝부분이 리액션으로 채워져 있어서, 단순히 마지막 n개를
     쓰면 질의가 "ㅇㅇ 응 그래"가 되고 검색이 통째로 헛돈다.
     """
-    ordered = sorted(messages, key=lambda m: m.ts)
+    ordered = sorted(messages, key=lambda m: m.sent_at)
     meaningful = [m for m in ordered if not is_reaction(m.content)]
     return " ".join(m.content for m in (meaningful or ordered)[-n:])
 
@@ -119,6 +119,25 @@ def search(query: str, k: int = 3) -> list[Memory]:
         if m is not None:
             hits.append(m)
     return hits
+
+
+def retrieve_many(
+    recent: str,
+    k: int = 5,
+    now: datetime | None = None,
+    kinds: tuple[str, ...] | None = None,
+) -> list[Memory]:
+    """맥락과 유사한 기억 **여러 건**. 데이트 코스 추천이 근거로 쓴다.
+
+    소재 제시는 기억 1건을 골라 문장 하나를 만들면 됐지만, 데이트 코스는
+    장소·음식·취향·일정을 조합해야 해서 여러 건이 한꺼번에 필요하다.
+    """
+    now = now or now_kst()
+    hits = search(recent, k=k * 3 if kinds else k)
+    if kinds:
+        hits = [m for m in hits if m.kind in kinds]
+    usable = [m for m in hits if m.used_at is None or now - m.used_at >= REUSE_AFTER]
+    return usable[:k]
 
 
 def retrieve(recent: str, k: int = 3, now: datetime | None = None) -> Memory | None:

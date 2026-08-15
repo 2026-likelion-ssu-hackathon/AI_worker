@@ -19,6 +19,7 @@ from collections import Counter
 
 from worker import DATA_DIR
 from worker.models import Message, Speaker, SpeakerProfile
+from worker.text import norm_len as _norm_len
 
 PROFILE_FILE = DATA_DIR / "speaker_profiles.json"
 
@@ -34,12 +35,6 @@ HARSH_ADDRESS = {"야", "너", "니가", "네가", "당신", "그쪽"}
 _LAUGH_RE = re.compile(r"[ㅋㅎ]")
 _EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\U00002600-\U000027BF]")
 _PERIOD_END_RE = re.compile(r"[^.]\.\s*$")  # "..." 은 제외, 단일 마침표 종결만
-_SPACE_RE = re.compile(r"\s+")
-
-
-def _norm_len(text: str) -> int:
-    return len(_SPACE_RE.sub("", text))
-
 
 # 호칭 뒤에 붙을 수 있는 조사. 이것만 허용해서 "너무"가 "너"로, "거야"가 "야"로 잡히지 않게 한다.
 _PARTICLES = {"", "는", "가", "도", "의", "한테", "랑", "이랑", "와", "과", "을", "를", "만", "은"}

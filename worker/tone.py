@@ -1,9 +1,13 @@
 """후보 기능 2 — 갈등 중재 (말투 교정 제안).
 
-공격 표현·오해 유발 표현이 감지되면 **보낸 사람에게만** 개별로
-① 왜 이 표현이 다르게 읽힐 수 있는지(방향 문구)
-② 지금 이어서 보낼 수 있는 대체 문장 1개
-를 제시한다.
+공격 표현·오해 유발 표현이 감지되면 **보낸 사람에게만** 개별로 제시한다.
+출력 3종은 백엔드 규격 8장 `resultData` 와 화면 명세가 그대로 대응된다.
+
+    situationDiagnosis   상황 진단      "지금 감정이 조금 올라와 있는 것 같아요"
+    alternativeSentence  대체 문장      "오늘 못 온다고 하니까 좀 서운했어"
+    correctionReason     그렇게 읽히는 이유  "'맨날'은 그동안 전부로 들릴 수 있어요"
+
+(`guideMessage` 는 고정 안내 문구라 LLM 이 만들지 않는다. `router.py` 의 상수다.)
 
 기존 트리거(①~⑤)가 "대화 흐름"을 보는 것과 달리, 이 기능은 **방금 전송된 메시지 하나**를 본다.
 
@@ -33,6 +37,7 @@ from worker.profile import (
     describe,
     resolve_profile,
 )
+from worker.text import norm_len as _norm_len
 
 # 직전 몇 턴을 맥락으로 넘길지 (명세: 직전 3턴)
 CONTEXT_TURNS = 3
@@ -54,7 +59,15 @@ _INSULT_RE = re.compile(
 )
 
 # 일반화 화법
-_GENERAL_RE = re.compile(r"(늘|맨날|만날|항상|매번|평생|한\s*번을|하나같이|늘상|또\s*그러)")
+#
+# `늘` 을 그냥 넣으면 **"오늘"의 '늘'이 걸린다.** 채팅에서 "오늘"보다 흔한 단어가 없어서
+# 상시 오발동한다. 앞뒤에 한글 음절이 붙지 않은 경우만 인정한다.
+#
+# `만날` 은 아예 뺐다. 경계를 잡아도 "토요일에 만날까"(만나다)와 "만날 늦어"(맨날)를
+# 구분할 수 없다. 같은 뜻은 `맨날` 이 잡는다.
+_GENERAL_RE = re.compile(
+    r"((?<![가-힣])늘(?![가-힣])|맨날|항상|매번|평생|한\s*번을|하나같이|늘상|또\s*그러)"
+)
 
 # 비꼼 · 반어법
 _SARCASM_RE = re.compile(r"(잘한다|잘하는\s*짓|잘\s*났|대단하다|훌륭하다|자랑이다|장하다|기특하다)")
@@ -62,12 +75,7 @@ _SARCASM_RE = re.compile(r"(잘한다|잘하는\s*짓|잘\s*났|대단하다|훌
 _LAUGH_RE = re.compile(r"[ㅋㅎ]")
 _EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\U00002600-\U000027BF]")
 _PERIOD_END_RE = re.compile(r"[^.]\.\s*$")
-_SPACE_RE = re.compile(r"\s+")
 _TOKEN_RE = re.compile(r"[^\s.,!?~…]+")
-
-
-def _norm_len(text: str) -> int:
-    return len(_SPACE_RE.sub("", text))
 
 
 # --------------------------------------------------------------------------
@@ -115,7 +123,7 @@ def check_tone_gate(
     if not messages:
         return ToneGateResult(triggered=False)
 
-    ordered = sorted(messages, key=lambda m: m.ts)
+    ordered = sorted(messages, key=lambda m: m.sent_at)
     last = ordered[-1]
     profile = profile or resolve_profile(last.sender, ordered)
     text = last.content
@@ -158,6 +166,9 @@ def check_tone_gate(
         triggered=bool(flags),
         speaker=last.sender if flags else None,
         message=text if flags else None,
+        # 규격서 7장 triggerMessageIds — 실제 기능 발동과 관련된 기준 메시지.
+        # 말투 교정은 "방금 전송된 메시지 하나"를 보므로 언제나 1개다.
+        message_id=last.message_id if flags else None,
         flags=flags,
     )
 
@@ -166,7 +177,7 @@ def check_tone_gate(
 # LLM 맥락 판정 + 생성
 # --------------------------------------------------------------------------
 def _context_block(messages: list[Message], profile: SpeakerProfile, gate: ToneGateResult) -> str:
-    ordered = sorted(messages, key=lambda m: m.ts)
+    ordered = sorted(messages, key=lambda m: m.sent_at)
     prior = ordered[-(CONTEXT_TURNS + 1) : -1]
     prior_lines = [f"{m.sender}: {m.content}" for m in prior] or ["(없음)"]
     lines = [
@@ -202,7 +213,7 @@ def tone_suggest(
     profile: SpeakerProfile,
     judged: ToneJudgeLLMOutput,
 ) -> ToneSuggestLLMOutput:
-    """방향 문구 + 대체 문장을 만든다."""
+    """상황 진단 + 대체 문장 + 그렇게 읽히는 이유를 만든다."""
     body = _context_block(messages, profile, gate)
     body += f"\n\n## 판정된 감정 온도\n{judged.emotion}"
     return ask(ToneSuggestLLMOutput, load_prompt("tone_suggest"), body)

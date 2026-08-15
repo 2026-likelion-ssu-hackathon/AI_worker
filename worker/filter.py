@@ -2,14 +2,24 @@
 
 프롬프트에도 "관계 상태 언급 금지"를 넣지만, 그것만 믿지 않는다.
 LLM 판단에 맡기지 않고 **문자열 검사로 강제**한다. 이 프로젝트의 절대 제약이기 때문이다.
+
+검사 대상은 **사용자 화면에 실제로 나가는 문자열 전부**다. 우리가 생성한 문구뿐 아니라
+유튜브 영상 제목·설명처럼 **외부에서 가져온 문자열도 포함한다.** "권태기 극복법"이라는
+영상 제목이 위젯에 뜨면, 그 문장을 우리가 쓴 게 아니어도 사용자는 화면에서 '권태기'를
+읽는다. 절대 제약의 근거는 "그 말을 들으면 의식이 심해진다"이지 "우리가 쓰면 안 된다"가
+아니다.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Callable
 
-from worker.models import Decision
+from worker.models import (
+    AiResult,
+    DateCourseResultData,
+    ToneResultData,
+    YoutubeResultData,
+)
 
 # docs/worker-tasks.md 5단계 목록 + 같은 뉘앙스의 변형
 BANNED = [
@@ -35,9 +45,9 @@ BANNED = [
 
 # 금지어 세트는 후보 기능과 무관하게 하나다. 절대 제약이 "관계 상태 언급 금지" 하나이기 때문이다.
 #
-# 갈등 중재(kind="tone")에서 **감정 상태를 언급하는 것은 금지가 아니다.**
-# 절대 제약의 근거는 "너네 권태기다" 같은 **관계 규정**을 들으면 의식이 심해진다는 것이고,
-# 그건 대화 소재 쪽 얘기다. 갈등 중재는 지금 감정이 올라온 걸 짚어주는 게 기능의 목적이다.
+# 갈등 중재(TONE_CORRECTION)에서 **감정 상태를 언급하는 것은 금지가 아니다.**
+# 절대 제약의 근거는 "너네 권태기다" 같은 **관계 규정**을 들으면 의식이 심해진다는 것이다.
+# 갈등 중재는 지금 감정이 올라온 걸 짚어주는 게 기능의 목적이다.
 # "지금 감정이 올라와 있어요" 는 통과해야 하고, "요즘 두 분 사이가" 는 여기서도 막힌다.
 #
 # 사람을 평가하는 표현("무례하시네요")은 프롬프트에서 다룬다. 하드 필터로 잡으면
@@ -46,44 +56,53 @@ BANNED = [
 _BANNED_RE = re.compile("|".join(re.escape(w) for w in BANNED))
 
 
-def find_banned(text: str | None, kind: str = "topic") -> str | None:
-    """걸린 금지어를 돌려준다. 없으면 None.
-
-    `kind` 는 지금 판정에 쓰이지 않는다. 후보별로 금지어가 갈릴 때를 위해 자리만 열어둔다.
-    """
+def find_banned(text: str | None) -> str | None:
+    """걸린 금지어를 돌려준다. 없으면 None."""
     if not text:
         return None
     hit = _BANNED_RE.search(text)
     return hit.group(0) if hit else None
 
 
-def is_clean(decision: Decision) -> bool:
-    kind = decision.kind
-    return (
-        find_banned(decision.content, kind) is None
-        and find_banned(decision.reason, kind) is None
-    )
+def visible_texts(result: AiResult) -> list[str]:
+    """사용자 화면에 나가는 문자열 전부."""
+    data = result.result_data
+    if isinstance(data, ToneResultData):
+        return [
+            data.situation_diagnosis,
+            data.guide_message,
+            data.alternative_sentence,
+            data.correction_reason,
+        ]
+    if isinstance(data, DateCourseResultData):
+        return [
+            data.guide_message,
+            data.course_name,
+            data.course_summary,
+            data.recommendation_reason,
+            data.main_place.name,
+            data.main_place.summary,
+            *(p.name for p in data.course_places),
+            *(p.summary for p in data.course_places),
+        ]
+    if isinstance(data, YoutubeResultData):
+        # title / video_summary 는 유튜브가 준 값이다. 우리가 안 썼어도 화면에는 뜬다.
+        return [
+            data.guide_message,
+            data.title,
+            data.recommendation_reason,
+            data.video_summary or "",
+        ]
+    return []
 
 
-def apply_filter(
-    decision: Decision,
-    regenerate: Callable[[], Decision] | None = None,
-    fallback: Callable[[], Decision] | None = None,
-) -> Decision:
-    """걸리면 1회 재생성, 또 걸리면 오늘의 질문으로 폴백한다."""
-    if is_clean(decision):
-        return decision
+def banned_in(result: AiResult) -> str | None:
+    for text in visible_texts(result):
+        hit = find_banned(text)
+        if hit is not None:
+            return hit
+    return None
 
-    if regenerate is not None:
-        retry = regenerate()
-        if is_clean(retry):
-            return retry
 
-    if fallback is not None:
-        safe = fallback()
-        if is_clean(safe):
-            return safe
-        # 폴백까지 걸리면 내보내지 않는다 — 절대 제약이 우선이다
-        raise RuntimeError(f"금지어 필터 폴백 실패: {safe.content!r}")
-
-    raise RuntimeError(f"금지어 감지, 대체 수단 없음: {decision.content!r}")
+def is_clean(result: AiResult) -> bool:
+    return banned_in(result) is None
