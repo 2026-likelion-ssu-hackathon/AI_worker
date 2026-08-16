@@ -23,6 +23,7 @@ from worker.models import (
     ToneResultData,
     YoutubeResultData,
 )
+from worker import segment
 from worker.llm import USAGE
 from worker.pipeline import Trace, analyze
 
@@ -42,11 +43,24 @@ def _show_trace(trace: Trace) -> None:
         print(f"  대화분절 {len(trace.segments)}개  {DIM}(마지막이 활성 세그먼트){OFF}")
         for i, seg in enumerate(trace.segments):
             head = "→" if i == len(trace.segments) - 1 else " "
-            how = "룰컷" if seg.by_rule else "LLM"
+            how = "룰컷" if seg.by_rule else "채점"
             ids = seg.message_ids
             span = f"{ids[0]}~{ids[-1]}" if len(ids) > 1 else f"{ids[0]}"
-            print(f"          {head} [{how}] {span} ({len(ids)}개) "
-                  f"{seg.topic or '(라벨 없음)'} / {seg.mood}")
+            first = seg.messages[0].content[:30]
+            print(f"          {head} [{how}] {span} ({len(ids)}개) {DIM}{first}{OFF}")
+
+    if trace.scores:
+        # 왜 잘렸는지가 여기서 보인다. 판정을 코드로 옮긴 이유가 이것이다.
+        cut_ids = {s.messages[0].message_id for s in trace.segments[1:]}
+        print(f"  연속성점수 {DIM}(높을수록 이전 맥락과 이어짐 · "
+              f"컷<{segment.CUT_HARD} 회색 유지≥{segment.KEEP_SOFT}){OFF}")
+        for sc in trace.scores:
+            mark = "✂" if sc.message_id in cut_ids else " "
+            zone = ("자름" if sc.topic_score < segment.CUT_HARD
+                    else "유지" if sc.topic_score >= segment.KEEP_SOFT else "회색")
+            print(f"          {mark} #{sc.message_id} 화제 {sc.topic_score:>3} "
+                  f"말투 {sc.tone_score:>3} 같은맥락={str(sc.same_context):<5} {zone}"
+                  f"  {DIM}{sc.note[:40]}{OFF}")
 
     if trace.extracted:
         print(f"  기억추출 {len(trace.extracted)}건 (신규 저장 {len(trace.saved)}건)")

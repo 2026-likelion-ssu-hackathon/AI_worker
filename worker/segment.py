@@ -1,47 +1,78 @@
 """대화 분절 — 스트림을 화제 단위로 끊는다.
 
-설계와 실측 근거는 `docs/segmentation-v3.md` 에 있다. 요지만 옮기면:
+설계와 실측 근거는 `docs/segmentation-v3.md`. 구조만 옮기면:
 
-    ① 룰 컷    3시간 이상 공백에서 자른다 (LLM 에게 묻지 않는다)
-    ② LLM 분절  마지막 조각만 화제로 나눈다 (요청당 1회)
+    ① 룰 컷     3시간 이상 공백에서 자른다 (LLM 에게 묻지 않는다)
+    ② LLM 채점   마지막 조각의 발화마다 "직전 맥락과 얼마나 이어지는가" (호출 1회)
+    ③ 룰 판정    임계값으로 붙일지 자를지 결정한다
+
+**LLM 은 경계를 정하지 않는다. 점수만 낸다.** 자르는 판단은 전부 `_should_cut()` 에 있다.
+경계가 LLM 안에 있으면 과분절이 나와도 프롬프트를 다시 쓰는 것 말고 할 수 있는 게 없고,
+그건 재현 가능한 조정이 아니다. 임계값으로 빼두면 숫자로 만질 수 있고 왜 잘렸는지가
+트레이스에 남는다.
 
 **경계 신호로 쓸 수 있는 룰은 시간 공백 하나뿐이다.** 화제 전환 표지어("그건 그렇고"),
-어휘 겹침, 임베딩 거리를 전부 재봤고 셋 다 실측에서 무너졌다 (문서 3-1).
+어휘 겹침, 임베딩 거리를 전부 재봤고 셋 다 실측에서 무너졌다 (문서 5장).
 
     표지어    같은 화제인 case9 에 '근데' 가 있고, 진짜 경계엔 표지어가 없었다
     어휘 겹침  단일 화제 안에서도 겹침이 0 이다. case4 는 어휘가 같은데 다른 대화다
     임베딩    경계에서 오히려 거리가 낮았다. 분포가 통째로 겹친다
 
-**LLM 과 룰이 서로 다른 구멍을 메운다.** LLM 은 화제는 보는데 시간을 못 본다 —
-`case4_routine`(사흘치, 공백 1432분)을 3회 모두 세그먼트 1개로 봤다. 화제가 "일상 대화"로
-같으니 LLM 입장에선 틀린 판단이 아니다. 룰 컷이 정확히 이 구멍을 메운다.
-
-**LLM 을 마지막 조각에만 거는 이유**: 라우팅도 기억 추출도 활성 세그먼트만 쓴다.
-앞 조각을 세밀하게 나눌 이유가 없고, 이 설계라야 LLM 호출이 요청당 1회로 고정된다.
+**룰 컷과 채점이 서로 다른 구멍을 메운다.** LLM 은 화제는 보는데 시간을 못 본다 —
+`case4_routine`(사흘치, 공백 1432분)을 한 덩어리로 본다. 룰 컷이 그걸 메운다.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from worker.llm import ask, load_prompt
-from worker.models import Message, Segment, SegmentLLMOutput
+from worker.models import Message, Segment, SegmentLLMOutput, SegmentScore
 
-__all__ = ["segment", "active_context"]
+__all__ = ["SegmentResult", "segment", "active_context"]
 
-# 이 이상 침묵하면 LLM 에게 묻지 않고 자른다.
+# ① 룰 컷 — 이 이상 침묵하면 채점하지 않고 자른다.
 #
 # ⚠️ **실측으로 정한 값이 아니다.** 단일 화제 안 최대 공백이 9분이고 경계가 140분 이상이라
 # 그 사이 구간에 표본이 없다. 그래서 "틀렸을 때 복구 가능한 쪽"으로 넉넉하게 잡았다 —
-# 룰 컷은 LLM 없이 확정이라 잘못 자르면 고칠 기회가 없지만, 관대하면 LLM 이 고친다.
+# 룰 컷은 LLM 없이 확정이라 잘못 자르면 고칠 기회가 없지만, 관대하면 채점이 고친다.
 GAP_HARD = timedelta(hours=3)
 
-# 조각이 이보다 짧으면 LLM 을 부르지 않는다. 나눌 것이 없다.
+# ③ 룰 판정 임계값.
+#
+# ⚠️ **실측으로 정한 값이 아니다. 프롬프트 앵커에서 역산한 값이다** (문서 11장).
+#
+# 프롬프트가 100 / 80 / 50 / 20 / 0 다섯 개를 기준점으로 준다. 실측해 보니 모델이
+# **거의 기준점 값만 쓴다** — case11 에서 100, 100, 100, 80, 80, 80, 80 이 나왔다.
+# 그래서 임계값은 기준점 사이에 놓아야 의미가 있다.
+#
+#     100 같은 것에 대해 계속       → 무조건 유지
+#      80 이어지는 이야기           → **회색.** 이어진다고 한 대화라는 뜻은 아니다
+#      50 느슨하게 연결             → 회색
+#      20 다른 이야기               → 무조건 자름
+#
+# 처음에 KEEP_SOFT 를 80 으로 뒀더니 case11 의 진짜 경계(2시간 20분 뒤 다툼 시작)가
+# 80 을 받아 통째로 안 잘렸다. "이어지는 이야기"는 유지 근거가 아니라 회색이다.
+CUT_HARD = 35    # 이 아래면 무조건 자른다 (앵커 20 을 잡는다)
+KEEP_SOFT = 90   # 이 위면 무조건 붙인다 (앵커 100 만 잡는다)
+TONE_CUT = 40    # 회색지대에서만 쓰는 보조 기준
+GAP_SOFT = timedelta(minutes=30)  # 회색지대에서만 쓰는 보조 기준
+
+# 조각이 이보다 짧으면 채점하지 않는다. 나눌 것이 없다.
 MIN_FOR_LLM = 3
 
 # 말투 판정에 최소한 확보해야 하는 메시지 수 (마지막 1개 + `tone.CONTEXT_TURNS` 3턴).
 # 활성 세그먼트가 이보다 짧으면 앞 세그먼트에서 뒤에서부터 채운다.
 CONTEXT_MIN = 4
+
+
+@dataclass
+class SegmentResult:
+    """분절 결과. `scores` 는 트레이스용이고 판정에는 이미 반영돼 있다."""
+
+    segments: list[Segment] = field(default_factory=list)
+    scores: list[SegmentScore] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -62,60 +93,107 @@ def _rule_cut(messages: list[Message]) -> list[list[Message]]:
 
 
 # --------------------------------------------------------------------------
-# ② LLM 분절 — 화제
+# ② LLM 채점
 # --------------------------------------------------------------------------
 def _transcript(messages: list[Message]) -> str:
-    lines = [f"[{m.message_id}] {m.sender}: {m.content}" for m in messages]
+    """`[HH:MM]` 을 붙인다.
+
+    안 붙이면 **LLM 이 시간 공백을 아예 못 본다.** 2시간 50분이 벌어져도 안 보이고,
+    3시간 룰 컷 바로 아래 구간이 통째로 사각지대가 된다 (문서 3-7).
+    다른 프롬프트는 `text.format_transcript()` 가 같은 일을 한다.
+    """
+    lines = [
+        f"[{m.message_id}] ({m.sent_at:%m-%d %H:%M}) {m.sender}: {m.content}"
+        for m in messages
+    ]
     return f"## 대화 ({len(messages)}개)\n" + "\n".join(lines)
 
 
-def _whole(messages: list[Message], by_rule: bool = True) -> list[Segment]:
-    """조각 전체를 세그먼트 1개로. 폴백 경로이자 '나눌 게 없음' 경로다."""
-    return [Segment(messages=messages, by_rule=by_rule)] if messages else []
+def _score(chunk: list[Message]) -> list[SegmentScore] | None:
+    """발화별 연속성 점수. 호출 자체가 실패하면 None → 자르지 않는다.
 
+    **점수가 빠지거나 엉뚱한 id 가 섞여도 통째로 버리지 않는다.** 아는 id 만 남기고
+    나머지는 없는 대로 둔다 — 빠진 발화는 `_cut_by_score()` 에서 "안 자름"으로 처리된다.
 
-def _llm_split(chunk: list[Message]) -> list[Segment]:
-    if len(chunk) < MIN_FOR_LLM:
-        return _whole(chunk)
-
+    전량 대조로 하면 실패 반경이 너무 크다. 점수 하나가 어긋났다고 조각 전체를 세그먼트
+    1개로 되돌리면 **길게 나눠 놨던 경계가 통째로 사라진다.** 대화가 길수록 어긋날 확률은
+    올라가는데 잃는 것도 같이 커진다 — 가장 나쁜 조합이다.
+    """
     try:
         out = ask(SegmentLLMOutput, load_prompt("segment"), _transcript(chunk))
-    except Exception:  # noqa: BLE001 — 분절 실패는 오류가 아니라 '안 나눔'이다
-        return _whole(chunk)
+    except Exception:  # noqa: BLE001 — 채점 실패는 오류가 아니라 '안 나눔'이다
+        return None
 
-    by_id = {m.message_id: m for m in chunk}
+    known = {m.message_id for m in chunk[1:]}
+    seen: set[int] = set()
+    scores: list[SegmentScore] = []
+    for s in out.scores:
+        if s.message_id in known and s.message_id not in seen:
+            seen.add(s.message_id)
+            scores.append(s)
+    return scores or None
+
+
+# --------------------------------------------------------------------------
+# ③ 룰 판정 — 임계값
+# --------------------------------------------------------------------------
+def _should_cut(score: SegmentScore, gap: timedelta) -> bool:
+    """이 발화 앞에서 자를 것인가.
+
+    회색지대(CUT_HARD ~ KEEP_SOFT)에서는 **붙이는 쪽이 기본값이다.** 잘못 자르면 뒤
+    단계가 맥락을 잃지만, 안 자르면 분절 전과 같아질 뿐이다 — 되돌릴 수 있는 실수를 택한다.
+    """
+    if score.topic_score >= KEEP_SOFT:
+        return False
+    if score.topic_score < CUT_HARD:
+        return True
+
+    # 회색지대 — 보조 신호로만 결정한다.
+    #
+    # ⚠️ `tone_score` 는 **단독으로 자르지 않는다.** case7_tone 은 호칭이 "오빠 → 야"로
+    # 바뀌지만 처음부터 끝까지 저녁 약속 얘기 하나다. 말투로 자르면 말투 판정에서 "왜
+    # 화가 났는지"(야근으로 약속이 깨짐)가 다른 세그먼트로 넘어가고, 대체 문장이 근거
+    # 없는 일반론이 된다 — 말투 교정이 자기 발밑을 판다 (문서 3-5).
+    if gap >= GAP_SOFT:
+        return True
+    return score.tone_score < TONE_CUT and not score.same_context
+
+
+def _cut_by_score(chunk: list[Message], scores: list[SegmentScore]) -> list[Segment]:
+    """점수를 id 로 찾아 붙인다. **점수가 없는 발화는 자르지 않는다.**
+
+    순서대로 zip 하지 않는 이유: 점수가 하나라도 빠지면 그 뒤가 전부 한 칸씩 밀려서
+    엉뚱한 자리에서 잘린다. id 로 맞추면 빠진 것만 조용히 넘어간다.
+    """
+    by_id = {s.message_id: s for s in scores}
     segments: list[Segment] = []
-    seen: list[int] = []
+    current: list[Message] = [chunk[0]]
 
-    for span in out.segments:
-        picked = [by_id[i] for i in span.message_ids if i in by_id]
-        if not picked:
-            continue
-        seen.extend(m.message_id for m in picked)
-        segments.append(
-            Segment(
-                messages=picked,
-                topic=span.topic.strip(),
-                mood=span.mood,
-                by_rule=False,
-            )
-        )
+    for message in chunk[1:]:
+        score = by_id.get(message.message_id)
+        gap = message.sent_at - current[-1].sent_at
+        if score is not None and _should_cut(score, gap):
+            segments.append(Segment(messages=current, by_rule=False))
+            current = [message]
+        else:
+            current.append(message)
 
-    # 검증 — 모든 메시지가 정확히 한 번씩, 순서대로 들어갔는가.
-    # 하나라도 어긋나면 통째로 폴백한다. 반쯤 맞은 경계는 안 나눈 것보다 나쁘다.
-    if seen != [m.message_id for m in chunk]:
-        return _whole(chunk)
-
+    segments.append(Segment(messages=current, by_rule=False))
     return segments
 
 
 # --------------------------------------------------------------------------
 # 진입점
 # --------------------------------------------------------------------------
-def segment(messages: list[Message]) -> list[Segment]:
+def _whole(messages: list[Message]) -> list[Segment]:
+    """조각 전체를 세그먼트 1개로. 폴백이자 '나눌 게 없음' 경로다."""
+    return [Segment(messages=messages, by_rule=True)] if messages else []
+
+
+def segment(messages: list[Message]) -> SegmentResult:
     """스트림을 세그먼트 목록으로. 마지막 원소가 **활성 세그먼트**다."""
     if not messages:
-        return []
+        return SegmentResult()
 
     ordered = sorted(messages, key=lambda m: (m.sent_at, m.message_id))
     chunks = _rule_cut(ordered)
@@ -123,8 +201,17 @@ def segment(messages: list[Message]) -> list[Segment]:
     segments: list[Segment] = []
     for chunk in chunks[:-1]:
         segments.extend(_whole(chunk))
-    segments.extend(_llm_split(chunks[-1]))
-    return segments
+
+    last = chunks[-1]
+    if len(last) < MIN_FOR_LLM:
+        return SegmentResult(segments=segments + _whole(last))
+
+    scores = _score(last)
+    if scores is None:
+        # 폴백 = 점수 전부 100 = 안 자름 = 분절 전 동작. 더 나빠지지 않는다.
+        return SegmentResult(segments=segments + _whole(last))
+
+    return SegmentResult(segments=segments + _cut_by_score(last, scores), scores=scores)
 
 
 def active_context(segments: list[Segment]) -> list[Message]:

@@ -45,6 +45,7 @@ from worker.models import (
     Memory,
     Message,
     Segment,
+    SegmentScore,
     ToneGateResult,
     ToneJudgeLLMOutput,
     ToneResultData,
@@ -75,6 +76,7 @@ class Trace:
         self.skipped: list[tuple[str, str]] = []  # (후보, 이유)
         # 대화 분절
         self.segments: list[Segment] = []
+        self.scores: list[SegmentScore] = []  # 발화별 연속성 점수 (왜 잘렸는지)
         # 기억
         self.extracted: list[Memory] = []
         self.saved: list[Memory] = []
@@ -273,9 +275,11 @@ def split(ctx: Context) -> None:
 
     이후 단계가 보는 범위가 여기서 정해진다. 설계는 `docs/segmentation-v3.md`.
     """
-    ctx.segments = segment(ctx.messages)
+    result = segment(ctx.messages)
+    ctx.segments = result.segments
     ctx.context = active_context(ctx.segments)
-    ctx.trace.segments = ctx.segments
+    ctx.trace.segments = result.segments
+    ctx.trace.scores = result.scores
 
 
 def harvest_memories(ctx: Context) -> None:
