@@ -1,7 +1,8 @@
 """LLM 접근 레이어.
 
 모든 LLM 호출은 여기를 거친다. `import openai` 직접 호출은 금지 — 트레이싱 일관성 때문이다.
-judge 와 topic 이 같은 모델 설정을 공유하도록 한 곳에 모아둔다.
+후보 3종과 기억 추출이 모델 설정·토큰 계량을 공유하도록 한 곳에 모아둔다.
+지금 이 모듈을 거치는 호출은 7종이다 (`worker/prompts/*.md` 와 1:1).
 """
 
 from __future__ import annotations

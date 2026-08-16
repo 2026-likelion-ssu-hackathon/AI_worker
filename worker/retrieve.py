@@ -3,8 +3,12 @@
 단순 최신순 조회가 아니라 현재 대화 맥락과 의미적으로 유사한 기억을 찾는다.
 이 차이가 "AI 가 진짜 듣고 있다"는 느낌을 만든다.
 
-기억이 10~15건 규모라 InMemoryVectorStore 로 충분하다. 프로세스 시작 시 한 번 인덱싱하고,
+기억이 27건 규모라 InMemoryVectorStore 로 충분하다. 프로세스 시작 시 한 번 인덱싱하고,
 후속 단계에서 같은 인터페이스로 pgvector 에 갈아끼운다.
+
+지금 실제로 쓰이는 진입점은 `recent_context()` → `retrieve_many()` 다 (데이트 코스).
+`retrieve()`(1건 선택) 와 `reset_index()` 는 파킹된 대화 소재 기능이 쓰던 것으로,
+복구할 때 그대로 쓰려고 남겨둔다.
 """
 
 from __future__ import annotations
@@ -141,7 +145,10 @@ def retrieve_many(
 
 
 def retrieve(recent: str, k: int = 3, now: datetime | None = None) -> Memory | None:
-    """맥락과 유사한 기억 중 쓸 수 있는 것 하나. 없으면 None (→ 오늘의 질문 폴백)."""
+    """맥락과 유사한 기억 중 쓸 수 있는 것 하나. 없으면 None.
+
+    ⏸️ 파킹된 대화 소재 기능 전용이다. 지금 파이프라인에서는 호출되지 않는다.
+    """
     now = now or now_kst()
     hits = search(recent, k=k)
 
@@ -175,7 +182,7 @@ def mark_used(memory_id: str, now: datetime | None = None, persist: bool = True)
 
 
 def save_memories(new: list[Memory], persist: bool = True) -> list[Memory]:
-    """judge 가 뽑은 기억을 저장소에 넣는다. 같은 id 는 건너뛴다."""
+    """`extract.py` 가 뽑은 기억을 저장소에 넣는다. 같은 id 는 건너뛴다."""
     if not new:
         return []
     memories = load_memories()

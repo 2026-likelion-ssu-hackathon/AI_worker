@@ -109,9 +109,9 @@ class AnalysisRequest(Camel):
     participants: list[Participant]
     messages: list[Message]
 
-    # ⚠️ 규격서에 없는 필드다. 워커가 "지금 몇 시인지"를 알아야 데이트 코스의 시간대
-    # 판단(심야/주말)이 가능하고, 픽스처로 결과를 재현하려면 고정 시각이 필요하다.
-    # 서버 담당자에게 추가를 요청한 상태이며, 없으면 마지막 메시지 시각으로 대체한다.
+    # 규격서에 없는 선택 필드다. **서버에 요청하지 않는다** — 시간대 판단은 LLM 에 넘기는
+    # 대화 로그의 메시지별 `HH:MM` 으로 되고, 기억 중복 판정(30일)에는 마지막 메시지 시각과의
+    # 차이가 의미가 없다. 픽스처로 결과를 재현할 때 시각을 고정하는 용도로만 남겨둔다.
     requested_at: datetime | None = None
 
     @field_validator("requested_at")

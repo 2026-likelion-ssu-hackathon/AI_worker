@@ -119,25 +119,156 @@ LLM 이 "성수다락" 같은 상호를 지어내면 존재하지 않는 가게�
 
 ---
 
-## 파일
+## 파일 — 지금 무엇을 하는가
 
-| 파일 | 역할 |
+### 경계 — 요청이 들어오고 응답이 나가는 곳
+
+| 파일 | 하는 일 |
 | --- | --- |
-| `models.py` | 규격서 DTO + 내부 스키마. camelCase 직렬화 |
-| `pipeline.py` | 요청 파싱 → 응답 생성. 예외를 밖으로 던지지 않는다 |
-| `router.py` | 후보 기능 실행, `results` 배열 조립 |
+| `__init__.py` | `load_dotenv()` 1회 + 경로 상수(`ROOT` / `DATA_DIR` / `PROMPT_DIR`). 어디서 import 해도 `.env` 가 한 번만 읽힌다 |
+| `models.py` | 규격서 DTO 전부 + 내부 스키마. 아래 상세 |
+| `pipeline.py` | `analyze(payload) -> (AnalysisResponse, Trace)` |
+| `tools/run.py` | CLI 러너. 사람이 읽는 출력 / `--json` / `--verbose` / `--no-persist` |
+| `tools/check_keys.py` | 외부 키 3종이 실제로 붙는지 점검. 유튜브는 1 unit 짜리 `videos.list` 로 검증해 쿼터를 안 쓴다 |
+
+**`models.py`** — `Camel` 베이스가 `alias_generator=to_camel` 을 걸어서
+`model_dump(by_alias=True, exclude_none=True)` 하면 규격서 JSON 이 그대로 나온다.
+`to_speaker()` / `to_key()` 가 `USER_A` ↔ 내부 `A` 를 경계에서만 변환하고,
+`as_kst()` 가 오프셋 없는 `sentAt` 을 KST 로 붙인다(기억 시드는 `+09:00` 이라 안 맞추면 비교에서 터진다).
+`*LLMOutput` 은 규격이 아니라 프롬프트와 짝이 되는 내부 스키마라 camelCase 로 바꾸지 않는다 —
+strict json_schema 가 nullable·date-time 을 잘 못 다뤄서 sentinel 문자열(`"none"`/`"unknown"`)로 받는다.
+
+**`pipeline.py`** — 파싱 실패 → `INVALID_REQUEST`, 참여자 목록에 없는 발화자 → `INVALID_PARTICIPANT`,
+그 외 예외 → `MODEL_ERROR`. **예외를 밖으로 던지지 않는다.** 워커가 죽으면 채팅 서버가
+타임아웃까지 붙잡혀 있게 된다. 메시지를 `(sent_at, message_id)` 로 정렬해 `Context` 를 만들고,
+결과가 0건이면 `SKIPPED`.
+
+### 배선 · 안전장치
+
+| 파일 | 하는 일 |
+| --- | --- |
+| `router.py` | 후보 3개를 순서대로 돌려 `results` 배열을 만든다. `Context` / `Trace` 정의 |
 | `filter.py` | 금지어 하드 필터 |
-| `llm.py` | LLM 접근 레이어 — 모든 호출이 여기를 거친다 |
-| `text.py` | 한국어 문장 판별 (`is_reaction` / `is_question` / 대화 로그 포맷) |
-| `copy.py` | 화면 고정 문구 (`guideMessage`). PM·디자인 소유 |
-| `extract.py` | 기억 추출 — 모든 후보가 공유 |
-| `retrieve.py` | RAG 기억 검색 |
-| `tone.py` / `profile.py` | [1] 갈등 중재 — 룰 트리거 + 개인 말투 기준선 |
-| `date_course.py` / `places.py` | [2] 데이트 코스 + 카카오 로컬 API |
-| `youtube.py` / `ytapi.py` | [3] 유튜브 추천 + YouTube Data API |
+| `copy.py` | `guideMessage` 고정 문구 3종. PM·디자인 소유 |
+
+**`router.py`** — 후보는 `build(ctx) -> AiResult | None` 만 구현하면 되고, `CANDIDATES` 리스트가
+실행 순서 겸 우선순위다. `SUPPRESS_YOUTUBE_WHEN_TONE = True` 가 말투 교정이 뜬 요청에서
+유튜브를 건너뛴다. `harvest_memories()` 가 후보들보다 **먼저** 돌아서 방금 한 발화가 같은 요청의
+데이트 코스에 반영된다. `Trace` 는 `--verbose` 출력 전용이고 판정에 관여하지 않는다.
+
+**`filter.py`** — `BANNED` 18개 문자열. `visible_texts()` 가 결과 종류별로 **화면에 나가는 문자열을
+전부** 뽑아 검사하는데, 여기에 **유튜브 영상 제목·`videoSummary` 가 포함된다.** 우리가 쓴 문장이
+아니어도 사용자는 화면에서 '권태기'를 읽기 때문이다. 감정 표현은 막지 않고
+사람 평가("무례하시네요")는 프롬프트가 다룬다 — 단어 목록으로 구분할 수 없는 영역이다.
+
+### 공용 — 후보 3개가 같이 쓴다
+
+| 파일 | 하는 일 |
+| --- | --- |
+| `llm.py` | 모든 LLM 호출의 단일 출구. `ask()` / `load_prompt()` / `USAGE` |
+| `text.py` | 한국어 문장 판별 + 대화 로그 포맷 |
+| `extract.py` | 대화 → 기억 추출 (매 요청 1회) |
+| `retrieve.py` | RAG 기억 검색 + 저장소 읽기·쓰기 |
+
+**`llm.py`** — `ask(schema, system, user)` 가 `init_chat_model` +
+`with_structured_output(method="json_schema", strict=True)` 단발 호출을 한다. 툴 루프가 없어서
+`create_agent` 를 쓰지 않는다. reasoning 모델이 `temperature` 를 거부하면 한 번 재시도한다.
+`include_raw=True` 인 이유는 **토큰 계량 때문이다** — 파싱 결과만 받으면 `usage_metadata` 가 안 온다.
+기본 모델 `openai:gpt-5`, `KAKAPO_MODEL` / `KAKAPO_TEMPERATURE` 로 덮어쓸 수 있다.
+
+**`text.py`** — `is_reaction()`(내용 없이 반응만 하는 말), `norm_len()`(공백 뺀 글자 수),
+`format_transcript()`(날짜 구분선 + `[HH:MM] A: …`). 대화 로그에 시각이 들어가서
+LLM 이 시간대를 판단할 수 있다 — 데이트 코스가 "밤 10시에 브런치"를 안 넣는 근거가 이것이다.
+
+**`extract.py`** — LLM 이 뽑은 기억 중 **`source_quote` 가 원문에 실제로 존재하는 것만** 남긴다.
+지어낸 기억은 나중에 추천 이유로 화면에 그대로 나간다. id 는 `content|quote` 의 sha1 앞 8자리라
+같은 발화가 중복 저장되지 않는다.
+
+**`retrieve.py`** — `recent_context()` 로 질의를 만들고(리액션 제외), `retrieve_many()` 가
+유사도 상위에서 `kinds` 필터 + `used_at` 30일 규칙을 적용해 여러 건을 돌려준다.
+`OpenAIEmbeddings` + `InMemoryVectorStore`, 프로세스당 1회 인덱싱. `save_memories()` / `mark_used()`
+는 `persist=False` 면 파일을 건드리지 않는다(반복 시연).
+
+### 후보 1 — 갈등 중재 (`tone.py` / `profile.py`)
+
+| 함수 | 하는 일 |
+| --- | --- |
+| `check_tone_gate()` | 마지막 메시지 1개에서 신호 6종을 찾는다. 확정하지 않고 후보만 잡는다 |
+| `tone_judge()` | LLM — 진짜 갈등인가, 맥락상 장난인가 |
+| `tone_suggest()` | LLM — 진단 + 대체 문장 + 이유 |
+| `profile.resolve_profile()` | 말투 기준선. 시드 있으면 시드, 없으면 대화에서 계산 |
+| `profile.addresses_in()` | 어절 단위 호칭 탐지 |
+
+`_GENERAL_RE` 의 `늘` 은 앞뒤에 한글 음절이 없을 때만 인정한다 — 안 그러면 **"오늘"의 '늘'이 걸려**
+상시 오발동한다. `만날` 은 아예 뺐다("토요일에 만날까"와 구분 불가, 같은 뜻은 `맨날` 이 잡는다).
+`addresses_in()` 이 어절+조사 단위로 보는 이유도 같다 — 부분 문자열로 찾으면 "너무"의 '너',
+"거야"의 '야'가 호칭으로 잡힌다.
+
+`_abrupt_flags()` 가 마침표·ㅋ·이모지·길이 4가지를 기준선과 대조하고,
+`abrupt_change` 혼자서는 하위 신호 `ABRUPT_ALONE_SIGNALS = 3` 개 이상일 때만 인정한다.
+
+### 후보 2 — 데이트 코스 (`date_course.py` / `places.py`)
+
+| 함수 | 하는 일 |
+| --- | --- |
+| `check_date_gate()` | 최근 12개에서 데이트 의도 4종 정규식 |
+| `plan_date()` | LLM — 지역 + 검색어 2~4개 + 코스 의도. **장소를 지어내지 않는다** |
+| `build_course()` | 검색어 순서대로 카카오에서 장소를 확정. 중복 제외 |
+| `write_reason()` | LLM — 확정된 상호를 보고 코스명·요약·추천 이유·장소 설명 |
+| `to_result()` | `mainPlace`(order 없음) + `coursePlaces`(order 1..n) 조립 |
+| `places.search_places()` | 카카오 로컬 키워드 검색 |
+| `places.region_center()` | 지역명 → 좌표 (`lru_cache`) |
+
+**지역은 좌표 반경 2km 로 자른다.** 질의에 지역명을 섞는 것만으로는 "성수동 카페"에 건대 카페가
+딸려오고, 주소 문자열 대조로 막으면 이번엔 서울숲이 걸러진다(주소가 `성동구 뚝섬로`).
+`_fits_intent()` 는 한국어 합성어의 **뒤쪽이 업종**이라는 성질을 쓴다 — `평양냉면`→`냉면`.
+카카오가 `평양냉면` 검색에 고기집을 1위로 주는 걸 그대로 쓰면 추천 이유의 근거가 통째로 날아간다.
+
+`places.CATEGORY_MAP` 이 카카오 `category_group_code` 를 규격서 `category` 8종으로 매핑한다.
+그룹 코드가 없는 곳(소품샵·서점)은 `_NAME_HINTS` 로 때려잡고 최후에는 `ETC`.
+
+### 후보 3 — 유튜브 (`youtube.py` / `ytapi.py`)
+
+| 함수 | 하는 일 |
+| --- | --- |
+| `check_concern_gate()` | 룰 프리필터. 고민 신호 5종이 아예 없으면 LLM 을 안 부른다 |
+| `classify_concern()` | LLM — 고민 유형 특정 + 한국어 검색어 1~3개 |
+| `ytapi.find_candidates()` | search → videos → commentThreads. 영상 + 베스트 댓글 3개 |
+| `pick_video()` | LLM — 댓글까지 읽고 1개 선정. 없으면 `-1`(침묵) |
+| `to_result()` | `contentType="MIXED"`, scope 에 따라 INDIVIDUAL/COUPLE |
+
+`_top_comments()` 가 `None` 을 돌려주면(댓글 비활성) **후보에서 뺀다.** 맥락 검증이 이 기능의
+안전장치라 검증 못 하는 영상은 쓰지 않는다. 외부 API 실패는 전부 예외 대신 빈 값으로 떨어진다 —
+규격서 13장 기준 검색 실패는 오류가 아니라 기능 미발동이다.
+
+쿼터: `search.list` 가 호출당 100 units, 하루 10,000. 추천 1건에 약 105 units → **하루 약 95회.**
+
+### 프롬프트 (`worker/prompts/*.md`)
+
+`load_prompt(name)` 이 파일명으로 읽어 system 메시지로 넣는다. 7개 전부 살아 있다.
+
+| 파일 | 쓰는 곳 |
+| --- | --- |
+| `extract.md` | 기억 추출 |
+| `tone_judge.md` / `tone_suggest.md` | 갈등 중재 (판정 / 생성) |
+| `date_plan.md` / `date_reason.md` | 데이트 코스 (계획 / 문구) |
+| `yt_concern.md` / `yt_pick.md` | 유튜브 (분류 / 선정) |
+
+### 데이터
+
+| 파일 | 내용 |
+| --- | --- |
+| `data/memories.json` | 기억 시드 27건. 실행 중 추출된 기억이 여기 append 된다 |
+| `data/speaker_profiles.json` | A·B 말투 기준선 시드 |
+
+### 지금은 안 불리는 것
 
 `parked/` 는 파킹된 대화 소재 기능이다. **파이썬 패키지가 아니고 import 되지 않는다.**
 복구 방법은 [`parked/README.md`](parked/README.md).
+
+`worker/` 안에도 파킹된 기능만 쓰던 함수가 남아 있다 — `retrieve.retrieve()`(기억 1건 선택),
+`retrieve.reset_index()`, `text.is_question()`. **복구할 때 그대로 쓰라고 남긴 것이다.**
+지우지 말 것.
 
 ---
 
