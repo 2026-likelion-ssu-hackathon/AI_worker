@@ -193,17 +193,33 @@ def build_course(queries: list[str], region: str | None) -> list[KakaoPlace]:
 
     검색어 의도에 맞는 결과를 우선하고, 하나도 없으면 1위 결과로 물러선다
     (`카페` 처럼 업종명이 상호·카테고리에 안 뜨는 검색어가 있다).
+
+    **지역명을 못 잡았을 때는 첫 장소를 코스의 중심으로 삼는다.** 안 그러면 검색어마다
+    전국에서 독립적으로 고르게 되고, 실측에서 `영화관 / 필름 현상 / 카페` 가
+    **용산 → 미상 → 남양주 북한강**으로 흩어졌다. 차로 한 시간 넘는 곳들이라 코스가 아니다.
+    `search_places` 의 반경 방어는 지역명이 있을 때만 걸리므로, 없을 때는 여기서 건다.
+
+    지역명이 있으면 기존대로 지역 중심 반경을 쓴다 — 그쪽은 이미 의도대로 동작한다.
     """
     course: list[KakaoPlace] = []
     taken: set[str] = set()
+    anchor: tuple[str, str] | None = None  # 지역명이 없을 때만 쓴다
 
     for query in queries[:MAX_PLACES]:
-        found = [p for p in search_places(query, region=region) if p.name not in taken]
+        found = [
+            p for p in search_places(query, region=region, center=anchor)
+            if p.name not in taken
+        ]
         if not found:
             continue
         picked = next((p for p in found if _fits_intent(p, query)), found[0])
         course.append(picked)
         taken.add(picked.name)
+
+        # 첫 장소가 잡히면 그 좌표를 중심으로 고정한다. 지역명이 있으면 이미
+        # 지역 중심 반경이 걸려 있으므로 손대지 않는다.
+        if region is None and anchor is None and picked.x and picked.y:
+            anchor = (picked.x, picked.y)
 
     return course
 

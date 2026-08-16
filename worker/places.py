@@ -71,6 +71,10 @@ class KakaoPlace:
     category_name: str   # 카카오 원문 ("음식점 > 카페 > 커피전문점") — LLM 설명 생성용
     address: str
     url: str
+    # 좌표. 지역명을 모를 때 **첫 장소를 코스의 중심으로 삼기 위해** 들고 있는다.
+    # (`date_course.build_course` 참조)
+    x: str = ""
+    y: str = ""
 
 
 @lru_cache(maxsize=32)
@@ -116,13 +120,21 @@ def available() -> bool:
     return bool(os.getenv("KAKAO_REST_API_KEY"))
 
 
-def search_places(query: str, region: str | None = None, size: int = 5) -> list[KakaoPlace]:
+def search_places(
+    query: str,
+    region: str | None = None,
+    size: int = 5,
+    center: tuple[str, str] | None = None,
+) -> list[KakaoPlace]:
     """키워드로 장소를 찾는다. 키가 없거나 실패하면 빈 목록.
 
     `region` 을 주면 그 지역 중심에서 **반경 안의 결과만** 돌려준다.
     질의에 지역명을 섞는 것만으로는 부족하다 — 실측에서 "성수동 분위기 좋은 카페" 가
     옆 동네인 건대 카페를 물어왔다. 카카오 정확도 정렬이 인접 지역을 같이 주기 때문이다.
     데이트 코스는 동선이 이어져야 의미가 있어서, 반경을 벗어난 결과는 아예 버린다.
+
+    `center` 를 직접 주면 지역명 조회를 건너뛰고 그 좌표를 쓴다. **지역명을 모를 때
+    이미 확정한 장소를 중심으로 삼기 위한 것이다** (`date_course.build_course`).
     """
     key = os.getenv("KAKAO_REST_API_KEY")
     if not key:
@@ -130,7 +142,7 @@ def search_places(query: str, region: str | None = None, size: int = 5) -> list[
 
     params: dict[str, object] = {"query": query, "size": size, "sort": "accuracy"}
 
-    center = region_center(region) if region else None
+    center = center or (region_center(region) if region else None)
     if center is not None:
         params["x"], params["y"] = center
         params["radius"] = RADIUS
@@ -165,6 +177,8 @@ def search_places(query: str, region: str | None = None, size: int = 5) -> list[
                 category_name=category_name,
                 address=address,
                 url=url,
+                x=d.get("x", ""),
+                y=d.get("y", ""),
             )
         )
     return places
