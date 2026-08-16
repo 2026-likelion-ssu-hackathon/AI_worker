@@ -18,7 +18,9 @@ from worker import PROMPT_DIR
 
 T = TypeVar("T", bound=BaseModel)
 
-DEFAULT_MODEL = "openai:gpt-5"
+# gpt-5 는 케이스 1건에 2분씩 걸려서 픽스처를 돌려보며 고치는 속도가 안 나왔다.
+# 판정 품질보다 반복 횟수가 중요한 단계라 응답이 빠른 모델로 내렸다.
+DEFAULT_MODEL = "openai:gpt-4.1-mini"
 
 
 @lru_cache(maxsize=4)
