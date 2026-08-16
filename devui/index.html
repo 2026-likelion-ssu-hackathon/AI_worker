@@ -456,7 +456,7 @@ function renderRoom() {
     const past = si && !si.active ? " past" : "";
     const sc = scoreMap().get(m.messageId);
     const scoreTag = sc
-      ? `<br><span class="sc" title="${esc(sc.note)}">화제 ${sc.topic_score} · 말투 ${sc.tone_score}</span>`
+      ? `<br><span class="sc">화제 ${sc.topic_score} · 말투 ${sc.tone_score}</span>`
       : "";
 
     return `${gap}${divider}<div class="msg ${side}${past}" data-id="${m.messageId}">
@@ -790,8 +790,8 @@ function traceHtml(t) {
         const zone = s.topic_score < th.cutHard ? "자름"
           : s.topic_score >= th.keepSoft ? "유지" : "회색";
         return `<li class="${cut ? "picked" : ""}">${cut ? "✂ " : ""}#${s.message_id}
-          화제 ${s.topic_score} · 말투 ${s.tone_score} · ${zone}
-          <span class="q">${esc(s.note)}</span></li>`;
+          화제 ${s.topic_score} · 말투 ${s.tone_score}
+          <span class="q">${zone}${s.same_context ? "" : " · 다른 맥락"}</span></li>`;
       }).join("")}</ul></div>`);
   }
 

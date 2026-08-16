@@ -20,6 +20,7 @@ LLM 이 상호명을 만들면 존재하지 않는 가게가 나온다. 규격�
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from worker.copy import DATE_GUIDE
 from worker.llm import ask, load_prompt
@@ -35,7 +36,7 @@ from worker.models import (
     Place,
     to_key,
 )
-from worker.places import KakaoPlace, search_places
+from worker.places import KakaoPlace, region_center, search_places
 from worker.text import format_transcript
 
 # 코스에 넣을 장소 수
@@ -190,6 +191,29 @@ def _fits_intent(place: KakaoPlace, query: str) -> bool:
     return any(t in haystack for t in _intent_tokens(query))
 
 
+def _choose(found: list[KakaoPlace], query: str, taken: set[str]) -> KakaoPlace | None:
+    """검색 결과에서 한 곳을 고른다. 이미 쓴 상호는 뺀다."""
+    fresh = [p for p in found if p.name not in taken]
+    if not fresh:
+        return None
+    return next((p for p in fresh if _fits_intent(p, query)), fresh[0])
+
+
+def _search_all(
+    queries: list[str], region: str | None, center: tuple[str, str] | None
+) -> list[list[KakaoPlace]]:
+    """검색어들을 **동시에** 던진다. 순서는 입력 순서를 지킨다.
+
+    카카오 호출은 서로 독립이라 순차로 돌 이유가 없었다 — 실측 0.75초 → 0.20초.
+    """
+    if len(queries) == 1:
+        return [search_places(queries[0], region=region, center=center)]
+    with ThreadPoolExecutor(max_workers=len(queries)) as pool:
+        return list(pool.map(
+            lambda q: search_places(q, region=region, center=center), queries
+        ))
+
+
 def build_course(queries: list[str], region: str | None) -> list[KakaoPlace]:
     """검색어 순서대로 장소를 하나씩 확정한다. 같은 장소가 겹치지 않게 한다.
 
@@ -203,26 +227,53 @@ def build_course(queries: list[str], region: str | None) -> list[KakaoPlace]:
 
     지역명이 있으면 기존대로 지역 중심 반경을 쓴다 — 그쪽은 이미 의도대로 동작한다.
     """
+    queries = list(queries[:MAX_PLACES])
+    if not queries:
+        return []
+
     course: list[KakaoPlace] = []
     taken: set[str] = set()
-    anchor: tuple[str, str] | None = None  # 지역명이 없을 때만 쓴다
 
-    for query in queries[:MAX_PLACES]:
-        found = [
-            p for p in search_places(query, region=region, center=anchor)
-            if p.name not in taken
-        ]
-        if not found:
-            continue
-        picked = next((p for p in found if _fits_intent(p, query)), found[0])
-        course.append(picked)
-        taken.add(picked.name)
+    # 지역명이 있으면 검색끼리 의존이 없다 — 전부 동시에 던진다.
+    # 좌표 조회를 미리 한 번 돌려 `lru_cache` 를 데운다. 안 그러면 병렬 호출이 같은 지역
+    # 조회를 동시에 중복해서 날린다.
+    if region is not None:
+        region_center(region)
+        for query, found in zip(queries, _search_all(queries, region, None)):
+            if (picked := _choose(found, query, taken)) is not None:
+                course.append(picked)
+                taken.add(picked.name)
+        return course
 
-        # 첫 장소가 잡히면 그 좌표를 중심으로 고정한다. 지역명이 있으면 이미
-        # 지역 중심 반경이 걸려 있으므로 손대지 않는다.
-        if region is None and anchor is None and picked.x and picked.y:
-            anchor = (picked.x, picked.y)
+    # 지역명이 없으면 **첫 장소가 코스의 중심**이라 그것만 먼저 확정해야 한다.
+    head = _choose(search_places(queries[0], region=None), queries[0], taken)
+    anchor: tuple[str, str] | None = None
+    if head is not None:
+        course.append(head)
+        taken.add(head.name)
+        if head.x and head.y:
+            anchor = (head.x, head.y)
 
+    rest = queries[1:]
+    if not rest:
+        return course
+
+    if anchor is None:
+        # 첫 검색이 비어서 중심을 못 잡았다. 원래대로 순차로 돌면서 잡는다 (드문 경우).
+        for query in rest:
+            found = search_places(query, region=None, center=anchor)
+            if (picked := _choose(found, query, taken)) is None:
+                continue
+            course.append(picked)
+            taken.add(picked.name)
+            if anchor is None and picked.x and picked.y:
+                anchor = (picked.x, picked.y)
+        return course
+
+    for query, found in zip(rest, _search_all(rest, None, anchor)):
+        if (picked := _choose(found, query, taken)) is not None:
+            course.append(picked)
+            taken.add(picked.name)
     return course
 
 

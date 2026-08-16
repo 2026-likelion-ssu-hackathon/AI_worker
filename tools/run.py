@@ -59,8 +59,7 @@ def _show_trace(trace: Trace) -> None:
             zone = ("자름" if sc.topic_score < segment.CUT_HARD
                     else "유지" if sc.topic_score >= segment.KEEP_SOFT else "회색")
             print(f"          {mark} #{sc.message_id} 화제 {sc.topic_score:>3} "
-                  f"말투 {sc.tone_score:>3} 같은맥락={str(sc.same_context):<5} {zone}"
-                  f"  {DIM}{sc.note[:40]}{OFF}")
+                  f"말투 {sc.tone_score:>3} 같은맥락={str(sc.same_context):<5} {zone}")
 
     if trace.extracted:
         print(f"  기억추출 {len(trace.extracted)}건 (신규 저장 {len(trace.saved)}건)")

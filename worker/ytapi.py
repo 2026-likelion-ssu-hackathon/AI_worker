@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import httpx
@@ -182,9 +183,17 @@ def find_candidates(queries: list[str], limit: int = MAX_CANDIDATES) -> list[Vid
                 seen.add(vid)
                 ids.append(vid)
 
+    videos = _details(ids)
+    if not videos:
+        return []
+
+    # 댓글 조회는 후보마다 독립이라 **동시에** 부른다. 순차로 돌면 후보 5개에 5번을
+    # 줄줄이 기다린다. commentThreads 는 1 unit 이라 쿼터에도 영향이 없다.
+    with ThreadPoolExecutor(max_workers=min(len(videos), 6)) as pool:
+        comment_lists = list(pool.map(lambda v: _top_comments(v.video_id), videos))
+
     candidates: list[Video] = []
-    for video in _details(ids):
-        comments = _top_comments(video.video_id)
+    for video, comments in zip(videos, comment_lists):
         if comments is None:
             continue  # 댓글 비활성 → 맥락 검증 불가 → 제외
         video.comments = comments
