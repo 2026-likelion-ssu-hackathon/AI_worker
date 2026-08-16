@@ -35,9 +35,6 @@ from worker.models import (
 from worker.text import format_transcript
 from worker.ytapi import Video
 
-# 고민 신호를 찾을 최근 메시지 범위
-WINDOW = 12
-
 # 관계 고민 신호. 확정이 아니라 "LLM 에게 물어볼 만한가"를 가른다.
 _CONCERN_RE = re.compile(
     # ① 갈등 직후 · 냉각기
@@ -54,10 +51,13 @@ _CONCERN_RE = re.compile(
 
 
 def check_concern_gate(messages: list[Message]) -> list[int]:
-    """고민 신호가 있는 메시지 id. 없으면 빈 목록 → LLM 을 부르지 않는다."""
+    """고민 신호가 있는 메시지 id. 없으면 빈 목록 → LLM 을 부르지 않는다.
+
+    **활성 세그먼트를 받는다.** 범위는 분절이 정한다 (`docs/segmentation-v3.md` 7장).
+    """
     if not messages:
         return []
-    recent = sorted(messages, key=lambda m: m.sent_at)[-WINDOW:]
+    recent = sorted(messages, key=lambda m: m.sent_at)
     return [m.message_id for m in recent if _CONCERN_RE.search(m.content)]
 
 

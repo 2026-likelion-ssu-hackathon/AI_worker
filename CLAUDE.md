@@ -27,6 +27,8 @@
 | `docs/contract-v1.md` | **백엔드 연동 규격** (팀 합의 사항, 임의로 못 바꿈) |
 | `docs/contract-review.md` | 규격서에 대한 워커 답변 + 서버 담당자 확인 요청 |
 | `docs/spec-v2.md` | PM 기능 명세 3종 + 구현 판단 기록 |
+| `docs/segmentation-v3.md` | 대화 분절(세그먼테이션) 설계 + 실측 근거 |
+| `docs/eval-dataset-v1.md` | 기억/RAG 평가셋 — 외부 멀티세션 대화 데이터 전처리 |
 | `docs/worker-tasks.md` | 작업 지시서 / 진행 상황 |
 | `parked/README.md` | 파킹된 대화 소재 기능과 복구 방법 |
 | `README.md` | 코드 설명서 |
@@ -117,7 +119,11 @@ B에게 개별 코멘트가 갔을 때 A는 그런 게 떴다는 사실 자체�
    ↓
 pipeline.analyze()          AnalysisRequest 파싱 · 검증
    ↓
-router.harvest_memories()   기억 추출 → 저장 (매 요청 1회)
+router.split()              대화 분절 — 스트림을 화제 단위로 끊는다
+   │                        ① 룰 컷: 3시간 이상 공백  ② LLM: 마지막 조각만 화제로
+   │                        이후 단계는 전부 **활성 세그먼트(마지막)** 만 본다
+   ↓
+router.harvest_memories()   기억 추출 → 저장 (활성 세그먼트, 매 요청 1회)
    ↓
 router.route()              후보 기능을 전부 돌려 results 배열을 만든다
    │
@@ -230,15 +236,20 @@ AI-Worker/
 │   ├── contract-v1.md           ← 백엔드 연동 규격 (팀 합의)
 │   ├── contract-review.md       ← 규격서 답변 + 확인 요청
 │   ├── spec-v2.md               ← PM 기능 명세 3종
+│   ├── segmentation-v3.md       ← 대화 분절 설계 + 실측 근거
+│   ├── eval-dataset-v1.md       ← 기억/RAG 평가셋 전처리
 │   └── worker-tasks.md          ← 작업 지시서
 ├── parked/                      ← 대화 소재 기능 아카이브 (import 되지 않음)
 ├── .env.example
 ├── requirements.txt
-├── fixtures/                    ← case1~case10, 규격서 요청 형식
+├── fixtures/                    ← case1~case11, 규격서 요청 형식
 ├── data/
 │   ├── memories.json            ← 기억 시드 27건
-│   └── speaker_profiles.json    ← 개인 말투 기준선 시드 (A·B)
-├── tools/run.py                 ← CLI 러너
+│   ├── speaker_profiles.json    ← 개인 말투 기준선 시드 (A·B)
+│   └── eval/                    ← 기억/RAG 평가셋 (git 제외, 재생성 가능)
+├── tools/
+│   ├── run.py                   ← CLI 러너
+│   └── build_eval_set.py        ← 외부 대화 데이터 → 평가셋
 └── worker/
     ├── models.py                ← 규격서 DTO + 내부 스키마
     ├── llm.py                   ← LLM 접근 레이어
@@ -247,6 +258,7 @@ AI-Worker/
     ├── router.py                ← 후보 기능 실행 + results 배열
     ├── pipeline.py              ← 요청 파싱 → 응답 생성
     ├── filter.py                ← 금지어 하드 필터
+    ├── segment.py               ← 대화 분절 (모든 단계보다 먼저)
     ├── extract.py               ← 기억 추출 (모든 후보가 공유)
     ├── retrieve.py              ← RAG 기억 검색
     │
@@ -255,6 +267,7 @@ AI-Worker/
     ├── youtube.py / ytapi.py    ← [3] 유튜브 (+ YouTube API)
     │
     └── prompts/
+        ├── segment.md
         ├── extract.md
         ├── tone_judge.md / tone_suggest.md
         ├── date_plan.md / date_reason.md
@@ -263,9 +276,48 @@ AI-Worker/
 
 ---
 
+## 대화 분절 (세그먼테이션)
+
+설계와 실측 근거 전문은 `docs/segmentation-v3.md`. 요지만:
+
+**서버는 최근 N개를 통째로 보내고 화제 경계를 모른다.** 그대로 두면 두 시간 전에 끝난
+데이트 얘기가 지금 막 싸우기 시작한 요청에서 데이트 코스를 발동시킨다. 실측으로 확인한
+고장이고, `fixtures/case11_mixed.json` 이 이 케이스다.
+
+```
+① 룰 컷    3시간 이상 공백에서 자른다 (LLM 에게 묻지 않는다)
+② LLM 분절  마지막 조각만 화제로 나눈다 (요청당 1회)
+③ 라우팅    활성 세그먼트(= 마지막)에만 건다
+```
+
+**경계 신호로 쓸 수 있는 룰은 시간 공백 하나뿐이다.** 화제 전환 표지어·어휘 겹침·임베딩
+거리를 전부 재봤고 셋 다 무너졌다 (문서 3-1). 새로 룰을 추가하려면 먼저 재볼 것.
+
+**룰과 LLM 이 서로 다른 구멍을 메운다.** LLM 은 화제는 보는데 시간을 못 본다 —
+`case4_routine`(사흘치)을 한 덩어리로 본다. 룰 컷이 그걸 메운다.
+
+**말투 변화는 경계가 아니다.** `case7_tone` 은 호칭이 "오빠 → 야"로 바뀌지만 처음부터 끝까지
+저녁 약속 얘기 하나다. 여기서 끊으면 말투 판정이 "왜 화가 났는지"를 못 본다.
+감정 변화는 세그먼트의 속성(`mood`)으로 적는다.
+
+**맥락과 트리거를 갈라 쓴다.**
+
+| | 보는 범위 |
+| --- | --- |
+| 게이트 · 트리거 id · RAG · 기억 추출 | `ctx.active` (활성 세그먼트만) |
+| 말투 판정 프롬프트의 직전 대화 | `ctx.context` (부족분만 앞에서 채움) |
+| 말투 기준선 (`profile.py`) | `ctx.messages` (전체 — 표본이 넓을수록 정확) |
+
+> ⚠️ `topic` · `mood` 라벨은 **화면에 절대 나가지 않는다.** LLM 이 "권태기 조짐" 같은 라벨을
+> 붙일 수 있고 `filter.py` 는 `AiResult` 의 화면 문자열만 검사한다. `resultData` 에 싣지 않는
+> 것이 유일한 방어다.
+
+---
+
 ## 후보 기능 3종
 
 기능 명세 전문은 `docs/spec-v2.md`, 출력 규격은 `docs/contract-v1.md` 를 본다.
+**세 후보 모두 활성 세그먼트만 본다** (위 참조).
 
 ### 1. 갈등 중재 — 말투 교정 (`TONE_CORRECTION`)
 
@@ -416,4 +468,7 @@ AI-Worker/
 - **서버 연동 규격은 팀 합의 사항이다.** 한쪽만 바꾸면 상대 서버가 깨진다.
   워커 쪽 의견은 `docs/contract-review.md` 에 적고 협의한다
 - **LLM 에게 실재하는 것의 이름·링크를 만들게 하지 않는다** (장소, 영상, 인용문)
+- **새로 만드는 문서·명세에는 버전을 붙인다** — `<주제>-v<n>.md` (`contract-v1`, `spec-v2`,
+  `segmentation-v3`). 커밋 전에 무엇이 어느 세대의 결정인지 남기기 위해서다.
+  기존 문서를 크게 뜯어고칠 때는 덮어쓰지 말고 다음 번호로 새로 만든다
 - 확실하지 않으면 추측해서 진행하지 말고 질문한다

@@ -38,6 +38,16 @@ CANDIDATE_LABEL = {
 
 
 def _show_trace(trace: Trace) -> None:
+    if trace.segments:
+        print(f"  대화분절 {len(trace.segments)}개  {DIM}(마지막이 활성 세그먼트){OFF}")
+        for i, seg in enumerate(trace.segments):
+            head = "→" if i == len(trace.segments) - 1 else " "
+            how = "룰컷" if seg.by_rule else "LLM"
+            ids = seg.message_ids
+            span = f"{ids[0]}~{ids[-1]}" if len(ids) > 1 else f"{ids[0]}"
+            print(f"          {head} [{how}] {span} ({len(ids)}개) "
+                  f"{seg.topic or '(라벨 없음)'} / {seg.mood}")
+
     if trace.extracted:
         print(f"  기억추출 {len(trace.extracted)}건 (신규 저장 {len(trace.saved)}건)")
         for m in trace.extracted:

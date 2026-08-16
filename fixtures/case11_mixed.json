@@ -1,0 +1,19 @@
+{
+  "analysisRequestId": "9f1c0a22-5c31-4b7e-8d10-77a2b0c4e901",
+  "chatRoomId": 1,
+  "participants": [
+    { "participantKey": "USER_A" },
+    { "participantKey": "USER_B" }
+  ],
+  "messages": [
+    { "messageId": 201, "sender": "USER_A", "content": "이번 주 토요일에 뭐 하지? 우리 성수 갈까", "sentAt": "2026-08-15T20:02:00+09:00" },
+    { "messageId": 202, "sender": "USER_B", "content": "좋지 카페 가고 싶다 ㅎㅎ", "sentAt": "2026-08-15T20:04:00+09:00" },
+    { "messageId": 203, "sender": "USER_A", "content": "배고파 마라탕도 땡기는데", "sentAt": "2026-08-15T20:06:00+09:00" },
+    { "messageId": 204, "sender": "USER_B", "content": "ㅋㅋ 그것도 좋고", "sentAt": "2026-08-15T20:08:00+09:00" },
+    { "messageId": 205, "sender": "USER_B", "content": "이따 얘기하자 나 지금 좀 바빠", "sentAt": "2026-08-15T20:10:00+09:00" },
+    { "messageId": 206, "sender": "USER_A", "content": "연락 왜 안 봐", "sentAt": "2026-08-15T22:30:00+09:00" },
+    { "messageId": 207, "sender": "USER_B", "content": "아 미안 이제 봤어", "sentAt": "2026-08-15T22:35:00+09:00" },
+    { "messageId": 208, "sender": "USER_A", "content": "너 맨날 이런 식이지.", "sentAt": "2026-08-15T22:37:00+09:00" }
+  ],
+  "requestedAt": "2026-08-15T22:38:00+09:00"
+}

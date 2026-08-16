@@ -218,6 +218,49 @@ class AnalysisResponse(Camel):
 
 
 # --------------------------------------------------------------------------
+# 대화 분절 (`docs/segmentation-v3.md`)
+# --------------------------------------------------------------------------
+# 세그먼트의 감정 온도. **경계 신호가 아니라 세그먼트의 속성이다** —
+# 말투가 격해져도 화제가 같으면 자르지 않는다 (문서 3-5).
+SegmentMood = Literal["light", "neutral", "tense", "heavy"]
+
+
+class SegmentSpan(BaseModel):
+    """LLM 이 돌려주는 경계. **`messageId` 목록만 받는다.**
+
+    본문을 다시 쓰게 하면 환각이 섞인다 — 장소·영상에 적용한 원칙과 같다.
+    """
+
+    message_ids: list[int]
+    topic: str
+    mood: SegmentMood
+
+
+class SegmentLLMOutput(BaseModel):
+    segments: list[SegmentSpan]
+
+
+class Segment(BaseModel):
+    """같은 화제로 이어지는 연속 메시지 묶음. 라우팅과 기억 추출의 단위.
+
+    `topic` · `mood` 는 **내부 라벨이다. 화면에 절대 나가지 않는다.**
+    LLM 이 "권태기 조짐" 같은 라벨을 붙일 수 있고, `filter.py` 는 `AiResult` 의 화면
+    문자열만 검사하므로 라벨은 걸러지지 않는다. `resultData` 에 싣지 않는 것이 유일한
+    방어다 (문서 6장).
+    """
+
+    messages: list[Message]
+    topic: str = ""
+    mood: SegmentMood = "neutral"
+    # 룰 컷(시간 공백)으로만 만들어졌는가. LLM 이 화제로 나눈 것과 구분한다 (트레이스용).
+    by_rule: bool = False
+
+    @property
+    def message_ids(self) -> list[int]:
+        return [m.message_id for m in self.messages]
+
+
+# --------------------------------------------------------------------------
 # 기억 저장소
 # --------------------------------------------------------------------------
 class Memory(BaseModel):

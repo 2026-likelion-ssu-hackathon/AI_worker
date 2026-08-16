@@ -141,20 +141,32 @@ strict json_schema 가 nullable·date-time 을 잘 못 다뤄서 sentinel 문자
 **`pipeline.py`** — 파싱 실패 → `INVALID_REQUEST`, 참여자 목록에 없는 발화자 → `INVALID_PARTICIPANT`,
 그 외 예외 → `MODEL_ERROR`. **예외를 밖으로 던지지 않는다.** 워커가 죽으면 채팅 서버가
 타임아웃까지 붙잡혀 있게 된다. 메시지를 `(sent_at, message_id)` 로 정렬해 `Context` 를 만들고,
-결과가 0건이면 `SKIPPED`.
+`split()` → `harvest_memories()` → `route()` 순으로 부른다. 결과가 0건이면 `SKIPPED`.
 
 ### 배선 · 안전장치
 
 | 파일 | 하는 일 |
 | --- | --- |
+| `segment.py` | 대화 분절. 스트림을 화제 단위로 끊는다 (모든 단계보다 먼저) |
 | `router.py` | 후보 3개를 순서대로 돌려 `results` 배열을 만든다. `Context` / `Trace` 정의 |
 | `filter.py` | 금지어 하드 필터 |
 | `copy.py` | `guideMessage` 고정 문구 3종. PM·디자인 소유 |
 
+**`segment.py`** — `segment(messages)` 가 ① 3시간 이상 공백에서 룰로 자르고 ② **마지막
+조각만** LLM 으로 화제 분절한다(요청당 1회). 앞 조각은 라우팅에 안 쓰이므로 나눌 이유가 없다.
+LLM 은 `messageId` 목록만 돌려주고, 모든 메시지가 정확히 한 번씩 순서대로 들어갔는지 검증한
+뒤 어긋나면 **조각 전체를 세그먼트 1개로 폴백**한다 — 반쯤 맞은 경계는 안 나눈 것보다 나쁘다.
+`active_context()` 는 말투 판정용 맥락을 4개까지 앞에서 채운다.
+**경계 신호로 쓸 수 있는 룰은 시간 공백 하나뿐이다** — 표지어·어휘 겹침·임베딩 거리를 전부
+실측했고 셋 다 무너졌다(`docs/segmentation-v3.md` 3-1). 룰을 추가하려면 먼저 재볼 것.
+
 **`router.py`** — 후보는 `build(ctx) -> AiResult | None` 만 구현하면 되고, `CANDIDATES` 리스트가
 실행 순서 겸 우선순위다. `SUPPRESS_YOUTUBE_WHEN_TONE = True` 가 말투 교정이 뜬 요청에서
-유튜브를 건너뛴다. `harvest_memories()` 가 후보들보다 **먼저** 돌아서 방금 한 발화가 같은 요청의
-데이트 코스에 반영된다. `Trace` 는 `--verbose` 출력 전용이고 판정에 관여하지 않는다.
+유튜브를 건너뛴다. `split()` 이 맨 먼저 돌아 이후 단계가 볼 범위를 정하고, `harvest_memories()`
+가 후보들보다 **먼저** 돌아서 방금 한 발화가 같은 요청의 데이트 코스에 반영된다.
+**후보 3개는 전부 `ctx.active`(활성 세그먼트)만 본다** — 말투 판정 프롬프트의 직전 대화만
+`ctx.context`, 말투 기준선만 `ctx.messages`(전체)를 쓴다.
+`Trace` 는 `--verbose` 출력 전용이고 판정에 관여하지 않는다.
 
 **`filter.py`** — `BANNED` 18개 문자열. `visible_texts()` 가 결과 종류별로 **화면에 나가는 문자열을
 전부** 뽑아 검사하는데, 여기에 **유튜브 영상 제목·`videoSummary` 가 포함된다.** 우리가 쓴 문장이
@@ -174,7 +186,9 @@ strict json_schema 가 nullable·date-time 을 잘 못 다뤄서 sentinel 문자
 `with_structured_output(method="json_schema", strict=True)` 단발 호출을 한다. 툴 루프가 없어서
 `create_agent` 를 쓰지 않는다. reasoning 모델이 `temperature` 를 거부하면 한 번 재시도한다.
 `include_raw=True` 인 이유는 **토큰 계량 때문이다** — 파싱 결과만 받으면 `usage_metadata` 가 안 온다.
-기본 모델 `openai:gpt-5`, `KAKAPO_MODEL` / `KAKAPO_TEMPERATURE` 로 덮어쓸 수 있다.
+기본 모델 `openai:gpt-4.1-mini`, `KAKAPO_MODEL` / `KAKAPO_TEMPERATURE` 로 덮어쓸 수 있다.
+gpt-5 는 케이스 1건에 2분씩 걸려 픽스처를 반복해서 돌릴 수가 없었다 — 지금 단계에서는
+응답 속도가 판정 품질보다 중요하다고 보고 내렸다.
 
 **`text.py`** — `is_reaction()`(내용 없이 반응만 하는 말), `norm_len()`(공백 뺀 글자 수),
 `format_transcript()`(날짜 구분선 + `[HH:MM] A: …`). 대화 로그에 시각이 들어가서
@@ -211,7 +225,7 @@ LLM 이 시간대를 판단할 수 있다 — 데이트 코스가 "밤 10시에 
 
 | 함수 | 하는 일 |
 | --- | --- |
-| `check_date_gate()` | 최근 12개에서 데이트 의도 4종 정규식 |
+| `check_date_gate()` | 활성 세그먼트에서 데이트 의도 4종 정규식 |
 | `plan_date()` | LLM — 지역 + 검색어 2~4개 + 코스 의도. **장소를 지어내지 않는다** |
 | `build_course()` | 검색어 순서대로 카카오에서 장소를 확정. 중복 제외 |
 | `write_reason()` | LLM — 확정된 상호를 보고 코스명·요약·추천 이유·장소 설명 |
@@ -393,5 +407,9 @@ pick_video()         LLM — 댓글까지 읽고 1개 선정. 없으면 -1 (침�
 | `case8_banter` | **안전장치** — 비속 표현이지만 장난이면 침묵 |
 | `case9_date` | 데이트 코스 — 일정 확정 + 계획 질문 + 지역 언급 |
 | `case10_concern` | 유튜브 — 반복 갈등 + 사과 방법 모름 |
+| `case11_mixed` | **대화 분절** — 주말 약속 → 2시간 20분 침묵 → 다툼. 데이트 코스가 미발동해야 한다 |
+
+`case4_routine` 은 사흘치라 룰 컷이 3개로 가르는지 같이 본다 — LLM 은 화제가 같아서
+한 덩어리로 보고, 시간 공백만 이걸 잡는다.
 
 `case7` 과 `case8` 을 붙여서 돌리면 감지가 어휘 필터가 아니라 맥락 판정이라는 게 보인다.

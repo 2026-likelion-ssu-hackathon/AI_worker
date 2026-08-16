@@ -2,7 +2,11 @@
 
 규격서(`docs/contract-v1.md`)의 **공통 분석 요청**을 받아 **공통 분석 응답**을 만든다.
 
-    AnalysisRequest → [기억 수확] → [후보 기능 라우팅] → AnalysisResponse
+    AnalysisRequest → [대화 분절] → [기억 수확] → [후보 기능 라우팅] → AnalysisResponse
+
+분절이 맨 앞에 서는 이유는 `docs/segmentation-v3.md` 에 있다. 요약하면 — 서버는 최근 N개를
+통째로 보내고 화제 경계를 모른다. 그대로 두면 두 시간 전에 끝난 데이트 얘기가 지금 막
+싸우기 시작한 요청에서 데이트 코스를 발동시킨다 (실측으로 확인한 고장이다).
 
 > ⏸️ HTTP 서버(`POST /internal/v1/chat-analyses`)는 아직 만들지 않았다.
 > 규격서가 초안 v1 이고 미확정 항목(감정 분석, 타임아웃, 오류 코드)이 남아 있어서,
@@ -17,7 +21,7 @@ from __future__ import annotations
 from pydantic import ValidationError
 
 from worker.models import AnalysisRequest, AnalysisResponse
-from worker.router import Context, Trace, harvest_memories, route
+from worker.router import Context, Trace, harvest_memories, route, split
 
 __all__ = ["Context", "Trace", "analyze"]
 
@@ -59,6 +63,7 @@ def analyze(payload: dict, persist: bool = True) -> tuple[AnalysisResponse, Trac
     )
 
     try:
+        split(ctx)
         harvest_memories(ctx)
         results = route(ctx)
     except Exception as exc:  # noqa: BLE001
