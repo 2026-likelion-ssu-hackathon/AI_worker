@@ -8,8 +8,9 @@
 from __future__ import annotations
 
 import os
+import time
 from functools import lru_cache
-from typing import TypeVar
+from typing import NamedTuple, TypeVar
 
 from langchain.chat_models import init_chat_model
 from pydantic import BaseModel
@@ -38,26 +39,41 @@ def load_prompt(name: str) -> str:
     return (PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
 
 
+class Call(NamedTuple):
+    """호출 1건의 계량. `stage` 는 출력 스키마 이름이라 단계와 1:1 로 대응한다."""
+
+    stage: str
+    seconds: float
+    input: int
+    output: int
+
+
 class Usage:
-    """이 프로세스에서 쓴 토큰. **유료는 OpenAI 뿐이라 여기만 센다.**
+    """이 프로세스에서 쓴 토큰과 시간. **유료는 OpenAI 뿐이라 여기만 센다.**
 
     카카오·유튜브는 무료 쿼터라 돈이 아니라 횟수 문제다.
+
+    `records` 에 호출별로 남긴다. 합계만 보면 어느 단계가 느린지 알 수 없어서 —
+    분절이 붙은 뒤로는 "요청당 몇 초"보다 "어느 단계가 몇 초"가 더 필요해졌다.
     """
 
     def __init__(self) -> None:
         self.calls = 0
         self.input = 0
         self.output = 0
+        self.records: list[Call] = []
 
-    def add(self, meta: dict | None) -> None:
+    def add(self, meta: dict | None, stage: str = "", seconds: float = 0.0) -> None:
         self.calls += 1
-        if not meta:
-            return
-        self.input += meta.get("input_tokens", 0)
-        self.output += meta.get("output_tokens", 0)
+        got_in = meta.get("input_tokens", 0) if meta else 0
+        got_out = meta.get("output_tokens", 0) if meta else 0
+        self.input += got_in
+        self.output += got_out
+        self.records.append(Call(stage=stage, seconds=seconds, input=got_in, output=got_out))
 
     def reset(self) -> None:
         self.calls = self.input = self.output = 0
+        self.records = []
 
     def __str__(self) -> str:
         return f"LLM {self.calls}회 · 입력 {self.input:,} 토큰 · 출력 {self.output:,} 토큰"
@@ -80,6 +96,7 @@ def ask(schema: type[T], system: str, user: str) -> T:
         model = _model(with_temperature).with_structured_output(
             schema, method="json_schema", strict=True, include_raw=True
         )
+        started = time.perf_counter()
         try:
             result = model.invoke(messages)
         except Exception as exc:  # noqa: BLE001
@@ -87,7 +104,11 @@ def ask(schema: type[T], system: str, user: str) -> T:
                 continue
             raise
 
-        USAGE.add(getattr(result.get("raw"), "usage_metadata", None))
+        USAGE.add(
+            getattr(result.get("raw"), "usage_metadata", None),
+            stage=schema.__name__,
+            seconds=time.perf_counter() - started,
+        )
         if result.get("parsing_error") is not None:
             raise RuntimeError(f"구조화 출력 파싱 실패: {result['parsing_error']}")
         return result["parsed"]

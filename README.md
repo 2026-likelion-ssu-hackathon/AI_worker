@@ -9,6 +9,8 @@
 | [`docs/contract-v1.md`](docs/contract-v1.md) | 백엔드 연동 규격 (팀 합의 사항) |
 | [`docs/contract-review.md`](docs/contract-review.md) | 규격서에 대한 워커 답변 + 확인 요청 |
 | [`docs/spec-v2.md`](docs/spec-v2.md) | PM 기능 명세 3종 |
+| [`docs/segmentation-v3.md`](docs/segmentation-v3.md) | 대화 분절 설계 + 실측 근거 |
+| [`docs/eval-dataset-v1.md`](docs/eval-dataset-v1.md) | 기억/RAG 평가셋 전처리 |
 | [`docs/worker-tasks.md`](docs/worker-tasks.md) | 작업 지시 / 진행 상황 |
 
 이 문서는 **코드가 어떻게 생겼는지**만 설명한다.
@@ -38,11 +40,30 @@ cp .env.example .env      # OPENAI_API_KEY 채우기 (나머지는 선택)
 
 | 옵션 | 설명 |
 | --- | --- |
-| `--verbose` `-v` | 게이트 판정, 검색된 기억, 외부 API 결과 표시 |
+| `--verbose` `-v` | 분절 점수, 게이트 판정, 검색된 기억, 외부 API 결과 표시 |
 | `--no-persist` | `used_at`·기억 저장을 파일에 쓰지 않는다 (**반복 시연용**) |
 | `--json` | 백엔드에 나가는 규격서 응답을 그대로 출력 |
 
 여러 개를 한 번에 돌릴 수 있다: `.venv/bin/python -m tools.run fixtures/*.json --no-persist`
+
+### 브라우저에서 보기 (`devui/`)
+
+```bash
+.venv/bin/python devui/server.py      # http://127.0.0.1:8765 자동 오픈
+```
+
+CLI 와 **같은 진입점**(`worker.pipeline.analyze`)을 부르는 로컬 확인용 UI다.
+판정 로직은 이 폴더에 하나도 없고, 새 의존성도 없다 (표준 라이브러리 `http.server`).
+
+- **채팅방** — 픽스처를 불러오거나 직접 대화를 만든다. 말풍선 hover 로 수정·삭제
+- **위젯 미리보기** — `A 화면` / `B 화면` 토글. `INDIVIDUAL` 결과가 상대에게 안 보이는 걸
+  눈으로 확인한다. CLI 로는 가장 안 보이던 부분이다
+- **계측** — 총 소요·LLM 호출·토큰, 그리고 **단계별 시간·토큰 표**
+- **대화 분절** — 세그먼트마다 **왜 여기서 잘렸는지**(임계값·공백·말투)를 보여준다.
+  채팅 쪽에도 구분선·연속성 점수·침묵 구간이 표시된다
+
+`--port` / `--no-open` 옵션이 있다. `persist` 는 기본 꺼짐이라 반복해서 눌러도 기억이
+오염되지 않는다.
 
 ### 외부 API 키
 
@@ -97,7 +118,11 @@ cp .env.example .env      # OPENAI_API_KEY 채우기 (나머지는 선택)
    ↓
 pipeline.analyze()        요청 파싱 · 참여자 검증
    ↓
-router.harvest_memories() 기억 추출 → 저장 (후보들보다 먼저 돈다)
+router.split()            대화 분절 — 화제 단위로 끊는다
+   │                      ① 3시간 룰 컷  ② LLM 채점  ③ 임계값 판정
+   │                      이후 단계는 전부 **활성 세그먼트(마지막)** 만 본다
+   ↓
+router.harvest_memories() 기억 추출 → 저장 (활성 세그먼트, 후보들보다 먼저 돈다)
    ↓
 router.route()            후보 3개를 돌려 results 배열을 만든다
    ↓
@@ -130,6 +155,7 @@ LLM 이 "성수다락" 같은 상호를 지어내면 존재하지 않는 가게�
 | `pipeline.py` | `analyze(payload) -> (AnalysisResponse, Trace)` |
 | `tools/run.py` | CLI 러너. 사람이 읽는 출력 / `--json` / `--verbose` / `--no-persist` |
 | `tools/check_keys.py` | 외부 키 3종이 실제로 붙는지 점검. 유튜브는 1 unit 짜리 `videos.list` 로 검증해 쿼터를 안 쓴다 |
+| `tools/build_eval_set.py` | 외부 멀티세션 대화 → 규격 형식 평가셋. `pyarrow` 필요 (런타임 의존성 아님) |
 
 **`models.py`** — `Camel` 베이스가 `alias_generator=to_camel` 을 걸어서
 `model_dump(by_alias=True, exclude_none=True)` 하면 규격서 JSON 이 그대로 나온다.
@@ -152,13 +178,22 @@ strict json_schema 가 nullable·date-time 을 잘 못 다뤄서 sentinel 문자
 | `filter.py` | 금지어 하드 필터 |
 | `copy.py` | `guideMessage` 고정 문구 3종. PM·디자인 소유 |
 
-**`segment.py`** — `segment(messages)` 가 ① 3시간 이상 공백에서 룰로 자르고 ② **마지막
-조각만** LLM 으로 화제 분절한다(요청당 1회). 앞 조각은 라우팅에 안 쓰이므로 나눌 이유가 없다.
-LLM 은 `messageId` 목록만 돌려주고, 모든 메시지가 정확히 한 번씩 순서대로 들어갔는지 검증한
-뒤 어긋나면 **조각 전체를 세그먼트 1개로 폴백**한다 — 반쯤 맞은 경계는 안 나눈 것보다 나쁘다.
-`active_context()` 는 말투 판정용 맥락을 4개까지 앞에서 채운다.
+**`segment.py`** — ① 3시간 이상 공백에서 룰로 자르고 ② **마지막 조각만** LLM 이 채점하고
+③ 임계값으로 자른다(호출 1회). 앞 조각은 라우팅에 안 쓰이므로 나눌 이유가 없다.
+
+**LLM 은 경계를 정하지 않는다.** 발화마다 "직전 맥락과 얼마나 이어지는가"를 `topic_score` ·
+`tone_score`(0~100, **높을수록 안 바뀐 것**)로 내고, 자를지는 `_should_cut()` 이 정한다 —
+`KEEP_SOFT=90` 위면 유지, `CUT_HARD=35` 아래면 절단, 사이는 회색지대라 시간 공백(30분)과
+`tone_score` 로 결정한다. **회색지대는 붙이는 쪽이 기본값이다** — 잘못 자르면 뒤 단계가
+맥락을 잃지만 안 자르면 분절 전과 같아질 뿐이다.
+
+임계값은 프롬프트 앵커(100/80/50/20/0)에서 역산했다. 모델이 거의 앵커 값만 써서 임계값을
+앵커 **사이에** 놓아야 한다 — `KEEP_SOFT=80` 이면 "이어지는 이야기"(80)가 전부 유지로 빠진다.
+
+점수 배열의 id 가 두 번째 발화부터 순서대로 맞지 않으면 **조각 전체를 세그먼트 1개로
+폴백**한다(= 분절 전 동작). `active_context()` 는 말투 판정용 맥락을 4개까지 앞에서 채운다.
 **경계 신호로 쓸 수 있는 룰은 시간 공백 하나뿐이다** — 표지어·어휘 겹침·임베딩 거리를 전부
-실측했고 셋 다 무너졌다(`docs/segmentation-v3.md` 3-1). 룰을 추가하려면 먼저 재볼 것.
+실측했고 셋 다 무너졌다(`docs/segmentation-v3.md` 5장). 룰을 추가하려면 먼저 재볼 것.
 
 **`router.py`** — 후보는 `build(ctx) -> AiResult | None` 만 구현하면 되고, `CANDIDATES` 리스트가
 실행 순서 겸 우선순위다. `SUPPRESS_YOUTUBE_WHEN_TONE = True` 가 말투 교정이 뜬 요청에서
@@ -186,6 +221,9 @@ LLM 은 `messageId` 목록만 돌려주고, 모든 메시지가 정확히 한 �
 `with_structured_output(method="json_schema", strict=True)` 단발 호출을 한다. 툴 루프가 없어서
 `create_agent` 를 쓰지 않는다. reasoning 모델이 `temperature` 를 거부하면 한 번 재시도한다.
 `include_raw=True` 인 이유는 **토큰 계량 때문이다** — 파싱 결과만 받으면 `usage_metadata` 가 안 온다.
+`USAGE.records` 에 호출별로 (출력 스키마 이름 · 시간 · 토큰) 을 남긴다. 합계만 보면 어느
+단계가 느린지 알 수 없어서다 — 분절이 붙은 뒤로 "요청당 몇 초"보다 "어느 단계가 몇 초"가
+필요해졌다. `devui` 의 계측 카드가 이걸 읽는다.
 기본 모델 `openai:gpt-4.1-mini`, `KAKAPO_MODEL` / `KAKAPO_TEMPERATURE` 로 덮어쓸 수 있다.
 gpt-5 는 케이스 1건에 2분씩 걸려 픽스처를 반복해서 돌릴 수가 없었다 — 지금 단계에서는
 응답 속도가 판정 품질보다 중요하다고 보고 내렸다.
@@ -259,10 +297,11 @@ LLM 이 시간대를 판단할 수 있다 — 데이트 코스가 "밤 10시에 
 
 ### 프롬프트 (`worker/prompts/*.md`)
 
-`load_prompt(name)` 이 파일명으로 읽어 system 메시지로 넣는다. 7개 전부 살아 있다.
+`load_prompt(name)` 이 파일명으로 읽어 system 메시지로 넣는다. 8개 전부 살아 있다.
 
 | 파일 | 쓰는 곳 |
 | --- | --- |
+| `segment.md` | 대화 분절 (발화별 연속성 채점) |
 | `extract.md` | 기억 추출 |
 | `tone_judge.md` / `tone_suggest.md` | 갈등 중재 (판정 / 생성) |
 | `date_plan.md` / `date_reason.md` | 데이트 코스 (계획 / 문구) |
@@ -274,6 +313,7 @@ LLM 이 시간대를 판단할 수 있다 — 데이트 코스가 "밤 10시에 
 | --- | --- |
 | `data/memories.json` | 기억 시드 27건. 실행 중 추출된 기억이 여기 append 된다 |
 | `data/speaker_profiles.json` | A·B 말투 기준선 시드 |
+| `data/eval/msd_sample.jsonl` | 실제 한국어 멀티세션 대화 2000건 (평가용). 원본 parquet 는 깃에 없다 |
 
 ### 지금은 안 불리는 것
 

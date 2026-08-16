@@ -5,9 +5,6 @@ __pycache__/
 venv/
 .DS_Store
 
-# 로컬 테스트용 개발 UI. 워커 규격의 일부가 아니라 올리지 않는다.
-devui/
-
 # 평가셋 원본 — 허깅페이스 parquet 122MB. GitHub 파일 제한(100MB)을 넘고,
 # `--download` 로 언제든 다시 받는다. 정제 결과(msd_sample.jsonl)는 올린다.
 # docs/eval-dataset-v1.md 참조.

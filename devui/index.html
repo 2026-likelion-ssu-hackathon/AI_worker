@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kakapo 워커 devui</title>
+<style>
+  :root {
+    --bg: #eef0f4;
+    --panel: #ffffff;
+    --line: #e2e5ea;
+    --ink: #1c1f24;
+    --dim: #737a85;
+    --faint: #9aa1ac;
+    --accent: #ff5f7e;
+    --accent-soft: #fff0f3;
+    --blue: #2f6df6;
+    --blue-soft: #eef3ff;
+    --amber: #f3b13c;
+    --ok: #1e9e6a;
+    --radius: 12px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.55 system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; cursor: pointer; }
+  a { color: var(--blue); }
+
+  /* ---------- 레이아웃 ---------- */
+  .app { display: flex; flex-direction: column; height: 100vh; }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+    flex: none;
+  }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: -.2px; }
+  header .tag {
+    font-size: 11px; color: var(--dim); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
+  }
+  header .spacer { flex: 1; }
+
+  main { flex: 1; display: grid; grid-template-columns: minmax(360px, 460px) 1fr; min-height: 0; }
+  .col { min-height: 0; display: flex; flex-direction: column; }
+  .col + .col { border-left: 1px solid var(--line); }
+
+  .bar {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .bar h2 { font-size: 12px; font-weight: 600; color: var(--dim); margin: 0; letter-spacing: .3px; }
+  .scroll { flex: 1; overflow-y: auto; padding: 16px; }
+
+  /* ---------- 컨트롤 ---------- */
+  select, input[type="text"], textarea {
+    font: inherit; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px;
+  }
+  select:focus, input:focus, textarea:focus { outline: 2px solid var(--blue-soft); border-color: var(--blue); }
+  .btn {
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 8px; padding: 6px 12px;
+  }
+  .btn:hover { background: #f7f8fa; }
+  .btn.primary {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  }
+  .btn.primary:hover { filter: brightness(1.04); }
+  .btn:disabled { opacity: .5; cursor: default; filter: none; }
+  .btn.sm { padding: 3px 8px; font-size: 12px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; background: var(--panel); padding: 5px 12px; color: var(--dim); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: #fff; font-weight: 600; }
+  label.check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--dim); }
+
+  /* ---------- 채팅 ---------- */
+  .room { display: flex; flex-direction: column; gap: 10px; }
+  .msg { display: flex; gap: 8px; align-items: flex-end; }
+  .msg.b { flex-direction: row-reverse; }
+  .who {
+    flex: none; width: 24px; height: 24px; border-radius: 8px; font-size: 11px; font-weight: 700;
+    display: grid; place-items: center; color: #fff; background: var(--accent);
+  }
+  .msg.b .who { background: var(--blue); }
+  .bubble {
+    position: relative; max-width: 78%; padding: 8px 11px; border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--line); white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.b .bubble { background: #fef8dc; border-color: #f3e9bd; }
+  .msg .meta { font-size: 10px; color: var(--faint); flex: none; align-self: flex-end; }
+  .msg .tools { display: none; gap: 3px; align-self: center; }
+  .msg:hover .tools { display: flex; }
+  .tools button {
+    border: 1px solid var(--line); background: var(--panel); color: var(--dim);
+    border-radius: 6px; width: 22px; height: 22px; line-height: 1; padding: 0; font-size: 11px;
+  }
+  .bubble.trigger { box-shadow: 0 0 0 2px var(--amber); }
+  .msg.past { opacity: .42; }
+  .seg-div {
+    display: flex; align-items: center; gap: 8px; margin: 6px 0 2px;
+    font-size: 11px; color: var(--faint);
+  }
+  .seg-div::before, .seg-div::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .seg-div b { font-weight: 600; color: var(--dim); }
+  .seg-div .how {
+    border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; background: var(--panel);
+  }
+  .seg-div.active b { color: var(--accent); }
+  .meta .sc { font-size: 9.5px; color: var(--faint); white-space: nowrap; }
+  .gap-note {
+    text-align: center; font-size: 11px; color: var(--faint);
+    padding: 2px 0; letter-spacing: .5px;
+  }
+
+  /* ---------- 계측 ---------- */
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    margin-bottom: 14px; overflow: hidden;
+  }
+  .card > h3 {
+    margin: 0; padding: 9px 14px; font-size: 12px; font-weight: 600; color: var(--dim);
+    border-bottom: 1px solid var(--line); background: #fbfbfc;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card > h3 .q { font-weight: 400; color: var(--faint); margin-left: auto; }
+  .card .in { padding: 12px 14px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); }
+  .tile { background: var(--panel); padding: 11px 13px; }
+  .tile .k { font-size: 10.5px; color: var(--faint); letter-spacing: .2px; }
+  .tile .v { font-size: 20px; font-weight: 650; letter-spacing: -.5px; margin-top: 2px; }
+  .tile .v small { font-size: 11px; font-weight: 500; color: var(--dim); margin-left: 2px; }
+
+  table.stages { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.stages th {
+    text-align: left; font-weight: 500; color: var(--faint); font-size: 10.5px;
+    padding: 0 8px 5px 0; border-bottom: 1px solid var(--line);
+  }
+  table.stages td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); }
+  table.stages tr:last-child td { border-bottom: 0; }
+  table.stages .num { text-align: right; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+  table.stages .barcell { width: 34%; }
+  .bar { height: 7px; border-radius: 4px; background: var(--ink); opacity: .78; min-width: 3px; }
+  table.stages tr.seg td { font-weight: 650; }
+  table.stages tr.seg .bar { background: var(--accent); opacity: 1; }
+
+  /* ---------- 분절 카드 ---------- */
+  .segrow { display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+  .segrow:first-child { border-top: 0; }
+  .segrow .no {
+    flex: none; width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center;
+    font-size: 11px; font-weight: 700; background: var(--bg); color: var(--dim);
+  }
+  .segrow.active .no { background: var(--accent); color: #fff; }
+  .segrow .body { min-width: 0; flex: 1; }
+  .segrow .line1 { font-size: 12.5px; }
+  .segrow .line1 b { font-weight: 650; }
+  .segrow .line2 { font-size: 11px; color: var(--faint); margin-top: 2px; }
+  .segrow .why {
+    display: inline-block; margin-top: 4px; font-size: 10.5px; font-family: var(--mono);
+    background: var(--bg); border-radius: 6px; padding: 2px 7px; color: var(--dim);
+  }
+  .segrow.active .why { background: var(--accent-soft); color: #b3364f; }
+  .badge-active {
+    font-size: 10px; font-weight: 700; color: var(--accent);
+    border: 1px solid #ffdbe2; background: var(--accent-soft); border-radius: 999px; padding: 1px 7px;
+  }
+  .bubble textarea { width: 100%; border: 0; padding: 0; resize: vertical; background: transparent; }
+
+  .composer { flex: none; border-top: 1px solid var(--line); background: var(--panel); padding: 10px 14px; }
+  .composer .row { display: flex; gap: 8px; align-items: center; }
+  .composer textarea { flex: 1; height: 38px; resize: none; }
+
+  /* ---------- 위젯 ---------- */
+  .phone { max-width: 520px; margin: 0 auto; }
+  .status {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+    font-size: 12px; color: var(--dim);
+  }
+  .pill {
+    font-size: 11px; font-weight: 700; letter-spacing: .3px;
+    border-radius: 999px; padding: 2px 9px; background: var(--bg); color: var(--dim);
+  }
+  .pill.completed { background: #e3f6ed; color: var(--ok); }
+  .pill.skipped { background: var(--bg); color: var(--dim); }
+  .pill.failed { background: #fdeaea; color: #cf3b3b; }
+
+  .widget {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    overflow: hidden; margin-bottom: 14px;
+  }
+  .widget .head {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    border-bottom: 1px solid var(--line); background: #fbfbfc;
+  }
+  .widget .head .kind { font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: .3px; }
+  .widget .head .scope { font-size: 11px; color: var(--faint); margin-left: auto; }
+  .widget .body { padding: 14px; }
+  .guide { font-size: 12px; color: var(--dim); margin-bottom: 8px; }
+  .diagnosis { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+  .alt {
+    background: var(--accent-soft); border: 1px solid #ffdbe2; border-radius: 10px;
+    padding: 12px; font-size: 15px; font-weight: 600; line-height: 1.5;
+  }
+  .why { margin-top: 10px; font-size: 13px; color: var(--dim); }
+  .course-name { font-size: 16px; font-weight: 700; }
+  .course-sum { color: var(--dim); font-size: 13px; margin-top: 2px; }
+  .places { list-style: none; margin: 12px 0 0; padding: 0; }
+  .places li { display: flex; gap: 9px; padding: 9px 0; border-top: 1px solid var(--line); }
+  .places .no {
+    flex: none; width: 20px; height: 20px; border-radius: 999px; background: var(--ink); color: #fff;
+    font-size: 11px; font-weight: 700; display: grid; place-items: center;
+  }
+  .places .nm { font-weight: 600; }
+  .places .cat { font-size: 11px; color: var(--faint); margin-left: 5px; }
+  .places .sm { font-size: 12px; color: var(--dim); }
+  .reason {
+    margin-top: 12px; padding: 10px 12px; background: var(--bg); border-radius: 10px;
+    font-size: 13px; line-height: 1.6;
+  }
+  .yt { display: flex; gap: 12px; }
+  .yt img { width: 148px; aspect-ratio: 16/9; object-fit: cover; border-radius: 8px; flex: none; background: var(--bg); }
+  .yt .t { font-weight: 600; line-height: 1.4; }
+  .yt .c { font-size: 12px; color: var(--dim); margin-top: 3px; }
+
+  .empty {
+    border: 1px dashed var(--line); border-radius: var(--radius); padding: 28px 16px;
+    text-align: center; color: var(--faint); background: rgba(255,255,255,.5);
+  }
+  .skips { margin-top: 6px; }
+  .skips div { font-size: 12px; color: var(--faint); padding: 3px 0; }
+  .hidden-note {
+    font-size: 12px; color: var(--faint); border: 1px dashed var(--line);
+    border-radius: 10px; padding: 8px 12px; margin-bottom: 14px; background: rgba(255,255,255,.5);
+  }
+
+  /* ---------- 트레이스 ---------- */
+  details.trace {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    margin-top: 14px; overflow: hidden;
+  }
+  details.trace > summary {
+    cursor: pointer; padding: 10px 14px; font-size: 12px; font-weight: 600; color: var(--dim);
+    list-style: none;
+  }
+  details.trace > summary::-webkit-details-marker { display: none; }
+  details.trace > summary::before { content: "▸ "; color: var(--faint); }
+  details.trace[open] > summary::before { content: "▾ "; }
+  .trace-body { padding: 0 14px 14px; }
+  .tsec { border-top: 1px solid var(--line); padding: 10px 0; }
+  .tsec:first-child { border-top: 0; }
+  .tsec h4 { margin: 0 0 6px; font-size: 12px; color: var(--ink); }
+  .tsec .kv { font-size: 12px; color: var(--dim); font-family: var(--mono); }
+  .tsec ul { margin: 4px 0 0; padding-left: 16px; font-size: 12px; color: var(--dim); }
+  .tsec li { margin: 2px 0; }
+  .tsec .q { color: var(--faint); }
+  .tsec .picked { color: var(--ok); font-weight: 700; }
+  pre.raw {
+    margin: 0; padding: 14px; background: #1c1f24; color: #e6e9ef; border-radius: var(--radius);
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.55; overflow-x: auto;
+  }
+  .err {
+    background: #fdeaea; border: 1px solid #f6c6c6; color: #a02626;
+    border-radius: var(--radius); padding: 12px 14px; font-size: 13px; margin-bottom: 14px;
+    white-space: pre-wrap; font-family: var(--mono);
+  }
+  .spin {
+    width: 13px; height: 13px; border: 2px solid rgba(255,255,255,.45); border-top-color: #fff;
+    border-radius: 50%; display: inline-block; animation: r .7s linear infinite; vertical-align: -2px;
+  }
+  @keyframes r { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>kakapo 워커</h1>
+    <span class="tag">devui · 로컬 전용</span>
+    <span class="spacer"></span>
+    <label class="check" title="켜면 data/memories.json 에 기억·used_at 이 실제로 기록된다">
+      <input type="checkbox" id="persist"> 저장소에 기록 (persist)
+    </label>
+    <button class="btn" id="copyBtn">요청 JSON 복사</button>
+    <button class="btn primary" id="runBtn">분석 실행</button>
+  </header>
+
+  <main>
+    <!-- 왼쪽: 채팅방 -->
+    <section class="col">
+      <div class="bar">
+        <h2>채팅방</h2>
+        <select id="fixtureSel" style="flex:1"><option value="">픽스처 불러오기…</option></select>
+        <button class="btn sm" id="clearBtn">비우기</button>
+      </div>
+      <div class="scroll" id="roomScroll"><div class="room" id="room"></div></div>
+      <div class="composer">
+        <div class="row">
+          <div class="seg" id="senderSeg">
+            <button data-s="A" aria-pressed="true">A</button>
+            <button data-s="B" aria-pressed="false">B</button>
+          </div>
+          <textarea id="input" placeholder="메시지 입력 후 Enter (Shift+Enter 줄바꿈)"></textarea>
+          <button class="btn" id="addBtn">추가</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 오른쪽: 위젯 -->
+    <section class="col">
+      <div class="bar">
+        <h2>위젯 미리보기</h2>
+        <div class="seg" id="viewerSeg">
+          <button data-v="A" aria-pressed="true">A 화면</button>
+          <button data-v="B" aria-pressed="false">B 화면</button>
+        </div>
+        <span class="spacer" style="flex:1"></span>
+        <span class="kv" id="usage" style="font-size:11px;color:var(--faint)"></span>
+      </div>
+      <div class="scroll"><div class="phone" id="out">
+        <div class="empty">왼쪽에서 대화를 만들고 <b>분석 실행</b>을 누르세요.<br>
+          픽스처를 고르면 규격서 요청 형식 그대로 불러옵니다.</div>
+      </div></div>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const state = {
+  messages: [],      // {messageId, sender:'A'|'B', content, sentAt}
+  sender: "A",
+  viewer: "A",
+  editing: null,     // 편집 중인 messageId
+  run: null,         // 마지막 분석 결과
+  error: null,
+  busy: false,
+};
+
+// ---------------------------------------------------------------- 유틸
+function nextId() {
+  return state.messages.reduce((m, x) => Math.max(m, x.messageId), 100) + 1;
+}
+function nextSentAt() {
+  const last = state.messages[state.messages.length - 1];
+  const base = last ? new Date(last.sentAt) : new Date();
+  return new Date(base.getTime() + 2 * 60 * 1000);
+}
+function kst(d) {
+  // +09:00 오프셋을 붙인 ISO. 워커는 오프셋이 없으면 KST 로 본다.
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+         `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}+09:00`;
+}
+function hhmm(iso) {
+  const m = String(iso).match(/T(\d{2}):(\d{2})/);
+  return m ? `${m[1]}:${m[2]}` : "";
+}
+function uuid() {
+  return (crypto.randomUUID && crypto.randomUUID()) ||
+    "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+    });
+}
+
+function payload() {
+  const last = state.messages[state.messages.length - 1];
+  const requestedAt = last
+    ? kst(new Date(new Date(last.sentAt).getTime() + 60 * 1000))
+    : kst(new Date());
+  return {
+    analysisRequestId: uuid(),
+    chatRoomId: 1,
+    participants: [{ participantKey: "USER_A" }, { participantKey: "USER_B" }],
+    messages: state.messages.map((m) => ({
+      messageId: m.messageId,
+      sender: "USER_" + m.sender,
+      content: m.content,
+      sentAt: m.sentAt,
+    })),
+    requestedAt,
+  };
+}
+
+// ---------------------------------------------------------------- 채팅 렌더
+function triggerIds() {
+  const ids = new Set();
+  for (const r of state.run?.response?.results || []) {
+    for (const id of r.triggerMessageIds || []) ids.add(id);
+  }
+  return ids;
+}
+
+// messageId → 그 발화의 연속성 점수. 판정이 왜 그렇게 났는지 말풍선 옆에 붙인다.
+function scoreMap() {
+  const map = new Map();
+  for (const s of state.run?.trace?.scores || []) map.set(s.message_id, s);
+  return map;
+}
+
+// messageId → 그 메시지가 속한 세그먼트 정보. 분절 결과가 없으면 빈 맵.
+function segmentMap() {
+  const segs = state.run?.trace?.segments || [];
+  const map = new Map();
+  segs.forEach((s, i) => {
+    const active = i === segs.length - 1;
+    (s.messageIds || []).forEach((id, j) =>
+      map.set(id, { seg: s, index: i, active, first: j === 0, total: segs.length }));
+  });
+  return map;
+}
+
+function renderRoom() {
+  const hot = triggerIds();
+  const segs = segmentMap();
+  const room = $("#room");
+  if (!state.messages.length) {
+    room.innerHTML = `<div class="empty">대화가 비어 있습니다.<br>픽스처를 고르거나 아래에서 직접 입력하세요.</div>`;
+    return;
+  }
+  room.innerHTML = state.messages.map((m, idx) => {
+    const side = m.sender === "B" ? "b" : "a";
+    // 침묵이 길면 눈에 보이게 한다. 분절 판정의 절반이 시간이라서다.
+    let gap = "";
+    if (idx > 0) {
+      const mins = Math.round(
+        (new Date(m.sentAt) - new Date(state.messages[idx - 1].sentAt)) / 60000);
+      if (mins >= 30) gap = `<div class="gap-note">⋯ ${gapText(mins)} 침묵 ⋯</div>`;
+    }
+    const mark = hot.has(m.messageId) ? " trigger" : "";
+    const inner = state.editing === m.messageId
+      ? `<textarea data-edit="${m.messageId}">${esc(m.content)}</textarea>`
+      : esc(m.content);
+
+    const si = segs.get(m.messageId);
+    let divider = "";
+    if (si && si.first && si.total > 1) {
+      divider = `<div class="seg-div${si.active ? " active" : ""}">
+        <span class="how">${si.seg.byRule ? "룰컷 3h" : "채점"}</span>
+        <b>세그먼트 ${si.index + 1}</b>
+        <span>${si.active ? "활성" : "과거"}</span>
+      </div>`;
+    }
+    const past = si && !si.active ? " past" : "";
+    const sc = scoreMap().get(m.messageId);
+    const scoreTag = sc
+      ? `<br><span class="sc" title="${esc(sc.note)}">화제 ${sc.topic_score} · 말투 ${sc.tone_score}</span>`
+      : "";
+
+    return `${gap}${divider}<div class="msg ${side}${past}" data-id="${m.messageId}">
+      <div class="who">${m.sender}</div>
+      <div class="bubble${mark}">${inner}</div>
+      <span class="meta">${hhmm(m.sentAt)}<br><span style="opacity:.6">#${m.messageId}</span>${scoreTag}</span>
+      <span class="tools">
+        <button data-act="edit" title="수정">✎</button>
+        <button data-act="del" title="삭제">✕</button>
+      </span>
+    </div>`;
+  }).join("");
+
+  const ta = room.querySelector("textarea[data-edit]");
+  if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+
+function scrollRoom() {
+  const s = $("#roomScroll");
+  s.scrollTop = s.scrollHeight;
+}
+
+$("#room").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const id = Number(btn.closest(".msg").dataset.id);
+  if (btn.dataset.act === "del") {
+    state.messages = state.messages.filter((m) => m.messageId !== id);
+  } else {
+    state.editing = state.editing === id ? null : id;
+  }
+  renderRoom();
+});
+
+// 한글 IME 조합 중의 Enter 는 "조합 확정"이지 "전송"이 아니다.
+//
+// 가드가 없으면 마지막 글자가 한 번 더 보내진다 — Enter 로 전송하면서 입력창을 비우는데,
+// 그 직후 브라우저가 조합을 확정하면서 마지막 글자를 빈 입력창에 다시 넣기 때문이다.
+// `isComposing` 이 표준이고, 옛 브라우저는 `keyCode === 229` 로만 알 수 있다.
+const composing = (e) => e.isComposing || e.keyCode === 229;
+
+$("#room").addEventListener("keydown", (e) => {
+  const ta = e.target.closest("textarea[data-edit]");
+  if (!ta) return;
+  if (e.key === "Escape") { state.editing = null; renderRoom(); return; }
+  if (composing(e)) return;
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+});
+
+$("#room").addEventListener("focusout", (e) => {
+  const ta = e.target.closest("textarea[data-edit]");
+  if (!ta) return;
+  const id = Number(ta.dataset.edit);
+  const msg = state.messages.find((m) => m.messageId === id);
+  if (msg) msg.content = ta.value.trim() || msg.content;
+  state.editing = null;
+  renderRoom();
+});
+
+function addMessage() {
+  const box = $("#input");
+  const text = box.value.trim();
+  if (!text) return;
+  state.messages.push({
+    messageId: nextId(),
+    sender: state.sender,
+    content: text,
+    sentAt: kst(nextSentAt()),
+  });
+  box.value = "";
+  renderRoom();
+  scrollRoom();
+}
+
+$("#addBtn").addEventListener("click", addMessage);
+$("#input").addEventListener("keydown", (e) => {
+  if (composing(e)) return;  // 한글 조합 중 — 위 주석 참조
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addMessage(); }
+});
+$("#senderSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.sender = b.dataset.s;
+  [...e.currentTarget.children].forEach((c) =>
+    c.setAttribute("aria-pressed", String(c.dataset.s === state.sender)));
+  $("#input").focus();
+});
+$("#clearBtn").addEventListener("click", () => {
+  state.messages = []; state.run = null; state.error = null;
+  $("#fixtureSel").value = "";
+  renderRoom(); renderOut();
+});
+
+// ---------------------------------------------------------------- 픽스처
+async function loadFixtures() {
+  const res = await fetch("/api/fixtures");
+  const { fixtures } = await res.json();
+  const sel = $("#fixtureSel");
+  for (const f of fixtures) {
+    const o = document.createElement("option");
+    o.value = f.name;
+    o.textContent = f.error ? `${f.name} (파싱 실패)` : f.name;
+    o.disabled = !!f.error;
+    sel.appendChild(o);
+  }
+  sel.addEventListener("change", () => {
+    const f = fixtures.find((x) => x.name === sel.value);
+    if (!f || !f.payload) return;
+    state.messages = (f.payload.messages || []).map((m) => ({
+      messageId: m.messageId,
+      sender: String(m.sender).replace("USER_", ""),
+      content: m.content,
+      sentAt: m.sentAt,
+    })).sort((a, b) => (a.sentAt < b.sentAt ? -1 : a.sentAt > b.sentAt ? 1 : a.messageId - b.messageId));
+    state.run = null; state.error = null;
+    renderRoom(); renderOut(); scrollRoom();
+  });
+}
+
+$("#copyBtn").addEventListener("click", async () => {
+  await navigator.clipboard.writeText(JSON.stringify(payload(), null, 2));
+  const b = $("#copyBtn"); const t = b.textContent;
+  b.textContent = "복사됨"; setTimeout(() => (b.textContent = t), 1200);
+});
+
+// ---------------------------------------------------------------- 실행
+async function run() {
+  if (state.busy) return;
+  if (!state.messages.length) { state.error = "대화가 비어 있습니다."; renderOut(); return; }
+  state.busy = true; state.error = null;
+  const btn = $("#runBtn");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin"></span> 분석 중…`;
+  try {
+    const res = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload: payload(), persist: $("#persist").checked }),
+    });
+    const data = await res.json();
+    if (data.error) { state.error = data.error; state.run = null; }
+    else { state.run = data; }
+  } catch (e) {
+    state.error = String(e);
+  } finally {
+    state.busy = false;
+    btn.disabled = false;
+    btn.textContent = "분석 실행";
+    renderOut(); renderRoom();
+  }
+}
+$("#runBtn").addEventListener("click", run);
+
+$("#viewerSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.viewer = b.dataset.v;
+  [...e.currentTarget.children].forEach((c) =>
+    c.setAttribute("aria-pressed", String(c.dataset.v === state.viewer)));
+  renderOut();
+});
+
+// ---------------------------------------------------------------- 위젯 렌더
+const KIND_LABEL = {
+  TONE_CORRECTION: "말투 교정",
+  DATE_RECOMMENDATION: "데이트 코스",
+  YOUTUBE_RECOMMENDATION: "영상 추천",
+};
+// LLM 출력 스키마 이름 → 파이프라인 단계. worker/llm.py 가 schema.__name__ 을 실어 보낸다.
+const STAGE_LABEL = {
+  SegmentLLMOutput: "대화 분절",
+  ExtractLLMOutput: "기억 추출",
+  ToneJudgeLLMOutput: "말투 판정",
+  ToneSuggestLLMOutput: "말투 생성",
+  DatePlanLLMOutput: "데이트 계획",
+  DateReasonLLMOutput: "데이트 문구",
+  ConcernLLMOutput: "고민 분류",
+  VideoPickLLMOutput: "영상 선정",
+};
+
+const ms = (v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${v}ms`);
+const gapText = (min) =>
+  min >= 1440 ? `${Math.floor(min / 1440)}일 ${Math.floor((min % 1440) / 60)}시간`
+  : min >= 60 ? `${Math.floor(min / 60)}시간 ${min % 60}분`
+  : `${min}분`;
+
+function metricsHtml(run) {
+  const u = run.usage || {};
+  const stages = u.stages || [];
+  const peak = Math.max(1, ...stages.map((s) => s.ms));
+
+  const rows = stages.map((s) => {
+    const isSeg = s.stage === "SegmentLLMOutput";
+    return `<tr class="${isSeg ? "seg" : ""}">
+      <td>${esc(STAGE_LABEL[s.stage] || s.stage)}</td>
+      <td class="barcell"><div class="bar" style="width:${(s.ms / peak) * 100}%"></div></td>
+      <td class="num">${ms(s.ms)}</td>
+      <td class="num">${s.input.toLocaleString()}</td>
+      <td class="num">${s.output.toLocaleString()}</td>
+    </tr>`;
+  }).join("");
+
+  return `<div class="card">
+    <h3>계측 <span class="q">단계별 시간 · 토큰</span></h3>
+    <div class="tiles">
+      <div class="tile"><div class="k">총 소요</div><div class="v">${ms(run.elapsedMs)}</div></div>
+      <div class="tile"><div class="k">LLM</div>
+        <div class="v">${u.calls}<small>회</small> <small>${ms(u.llmMs || 0)}</small></div></div>
+      <div class="tile"><div class="k">입력 토큰</div>
+        <div class="v">${(u.input || 0).toLocaleString()}</div></div>
+      <div class="tile"><div class="k">출력 토큰</div>
+        <div class="v">${(u.output || 0).toLocaleString()}</div></div>
+    </div>
+    <div class="in">
+      <table class="stages">
+        <thead><tr><th>단계</th><th></th><th class="num">시간</th>
+          <th class="num">입력</th><th class="num">출력</th></tr></thead>
+        <tbody>${rows}
+          <tr><td>외부 API · 룰</td><td class="barcell">
+            <div class="bar" style="width:${((u.otherMs || 0) / peak) * 100}%;opacity:.3"></div></td>
+            <td class="num">${ms(u.otherMs || 0)}</td><td class="num">—</td><td class="num">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function segmentsHtml(t) {
+  const segs = t.segments || [];
+  if (!segs.length) return "";
+  const last = segs.length - 1;
+  const th = t.thresholds || {};
+
+  const rows = segs.map((s, i) => {
+    const ids = s.messageIds || [];
+    const span = ids.length > 1 ? `#${ids[0]}~#${ids[ids.length - 1]}` : `#${ids[0]}`;
+    const active = i === last;
+    return `<div class="segrow ${active ? "active" : ""}">
+      <div class="no">${i + 1}</div>
+      <div class="body">
+        <div class="line1"><b>${span}</b> · ${ids.length}개
+          ${active ? '<span class="badge-active">활성 — 라우팅 대상</span>' : ""}</div>
+        <div class="line2">${esc(s.head.slice(0, 46))}</div>
+        <div class="why">${s.byRule && i === 0 ? "시작" : esc(s.cutReason)}</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  // 폴백은 "경계 없음"과 결과가 같다(세그먼트 1개). 갈라서 보여줘야 원인을 짚을 수 있다.
+  const warn = t.scoringFailed
+    ? `<div class="err" style="margin:0 0 10px">채점 실패 — 안 나눔 (폴백)
+LLM 호출이 실패했거나 점수를 하나도 못 받았습니다. 경계가 없어서 1개인 것이 아닙니다.</div>`
+    : "";
+
+  return `<div class="card">
+    <h3>대화 분절 ${segs.length}개
+      <span class="q">컷&lt;${th.cutHard} · 유지≥${th.keepSoft} · 회색은 공백 ${th.gapSoftMinutes}분/말투&lt;${th.toneCut}</span></h3>
+    <div class="in">${warn}${rows}</div>
+  </div>`;
+}
+const CAND_LABEL = { tone: "갈등 중재 (말투 교정)", date: "데이트 코스 추천", youtube: "유튜브 영상 추천" };
+
+function visibleTo(r, viewer) {
+  return r.visibilityType === "COUPLE" || r.targetParticipant === "USER_" + viewer;
+}
+
+function widgetHtml(r) {
+  const d = r.resultData || {};
+  const scope = r.visibilityType === "COUPLE"
+    ? "COUPLE · 둘 다 보임"
+    : `INDIVIDUAL · ${r.targetParticipant} 에게만`;
+  let body = "";
+
+  if (r.resultType === "TONE_CORRECTION") {
+    body = `
+      <div class="diagnosis">${esc(d.situationDiagnosis)}</div>
+      <div class="guide">${esc(d.guideMessage)}</div>
+      <div class="alt">“${esc(d.alternativeSentence)}”</div>
+      <div class="why">${esc(d.correctionReason)}</div>`;
+  } else if (r.resultType === "DATE_RECOMMENDATION") {
+    const places = (d.coursePlaces || []).map((p) => `
+      <li>
+        <span class="no">${p.order ?? ""}</span>
+        <span>
+          <span class="nm">${esc(p.name)}</span><span class="cat">${esc(p.category)}</span>
+          <div class="sm">${esc(p.summary)}</div>
+          <a class="sm" href="${esc(p.externalUrl)}" target="_blank" rel="noreferrer">${esc(p.externalUrl)}</a>
+        </span>
+      </li>`).join("");
+    body = `
+      <div class="guide">${esc(d.guideMessage)}</div>
+      <div class="course-name">${esc(d.courseName)}</div>
+      <div class="course-sum">${esc(d.courseSummary)}</div>
+      <ul class="places">${places}</ul>
+      <div class="reason">${esc(d.recommendationReason)}</div>`;
+  } else if (r.resultType === "YOUTUBE_RECOMMENDATION") {
+    body = `
+      <div class="guide">${esc(d.guideMessage)}</div>
+      <div class="yt">
+        <img src="${esc(d.thumbnailUrl)}" alt="">
+        <div>
+          <div class="t"><a href="${esc(d.videoUrl)}" target="_blank" rel="noreferrer">${esc(d.title)}</a></div>
+          <div class="c">${esc(d.channelName)}</div>
+        </div>
+      </div>
+      <div class="reason">${esc(d.recommendationReason)}</div>`;
+  } else {
+    body = `<pre class="raw">${esc(JSON.stringify(d, null, 2))}</pre>`;
+  }
+
+  return `<div class="widget">
+    <div class="head">
+      <span class="kind">kakapo</span>
+      <span style="font-size:12px;color:var(--dim)">${esc(KIND_LABEL[r.resultType] || r.resultType)}</span>
+      <span class="scope">${esc(scope)}</span>
+    </div>
+    <div class="body">${body}</div>
+  </div>`;
+}
+
+function traceHtml(t) {
+  if (!t) return "";
+  const sec = [];
+
+  if (t.scores?.length) {
+    const th = t.thresholds || {};
+    const cutIds = new Set((t.segments || []).slice(1).map((s) => (s.messageIds || [])[0]));
+    sec.push(`<div class="tsec"><h4>연속성 점수
+      <span class="q">높을수록 이전 맥락과 이어짐 · 컷&lt;${th.cutHard} 유지≥${th.keepSoft}
+      · 회색지대는 공백 ${th.gapSoftMinutes}분/말투&lt;${th.toneCut} 로 결정</span></h4>
+      <ul>${t.scores.map((s) => {
+        const cut = cutIds.has(s.message_id);
+        const zone = s.topic_score < th.cutHard ? "자름"
+          : s.topic_score >= th.keepSoft ? "유지" : "회색";
+        return `<li class="${cut ? "picked" : ""}">${cut ? "✂ " : ""}#${s.message_id}
+          화제 ${s.topic_score} · 말투 ${s.tone_score} · ${zone}
+          <span class="q">${esc(s.note)}</span></li>`;
+      }).join("")}</ul></div>`);
+  }
+
+  if (t.extracted?.length) {
+    sec.push(`<div class="tsec"><h4>기억 추출 ${t.extracted.length}건 (신규 저장 ${t.savedIds.length}건)</h4>
+      <ul>${t.extracted.map((m) => `<li>[${esc(m.kind)}] ${esc(m.content)}
+        <span class="q">← “${esc(m.source_quote)}”</span></li>`).join("")}</ul></div>`);
+  }
+
+  if (t.toneGate?.triggered) {
+    const j = t.toneJudged;
+    sec.push(`<div class="tsec"><h4>말투 게이트 — ${esc(t.toneGate.speaker)}</h4>
+      <ul>${(t.toneGate.flags || []).map((f) => `<li>[${esc(f.kind)}] ${esc(f.detail)}</li>`).join("")}</ul>
+      ${j ? `<div class="kv" style="margin-top:6px">should_suggest=${j.should_suggest} · is_playful=${j.is_playful} · emotion=${esc(j.emotion)}</div>
+      <div class="q" style="font-size:12px">${esc(j.note)}</div>` : ""}</div>`);
+  }
+
+  if (t.dateGate?.triggered) {
+    const p = t.datePlan;
+    sec.push(`<div class="tsec"><h4>데이트 게이트</h4>
+      <div class="kv">${esc(t.dateGate.detail || "")}</div>
+      ${t.dateMemories?.length ? `<h4 style="margin-top:8px">RAG 기억 ${t.dateMemories.length}건</h4>
+        <ul>${t.dateMemories.map((m) => `<li>${m.used_at ? "*" : ""}[${esc(m.kind)}] ${esc(m.content)}</li>`).join("")}</ul>` : ""}
+      ${p ? `<h4 style="margin-top:8px">계획</h4>
+        <div class="kv">should_recommend=${p.should_recommend} · region=${esc(p.region)}</div>
+        <div class="kv">검색어 ${esc(JSON.stringify(p.queries))}</div>
+        <div class="q" style="font-size:12px">${esc(p.reason_seed)}</div>` : ""}
+      ${t.datePlaces?.length ? `<h4 style="margin-top:8px">카카오 검색 결과</h4>
+        <ul>${t.datePlaces.map((x) => `<li>${esc(x.name)} — <span class="q">${esc(x.category_name)}</span></li>`).join("")}</ul>` : ""}
+    </div>`);
+  }
+
+  if (t.concern) {
+    const c = t.concern;
+    sec.push(`<div class="tsec"><h4>고민 판정</h4>
+      <div class="kv">should_recommend=${c.should_recommend} · concern=${esc(c.concern)} · stage=${esc(c.stage)}</div>
+      <div class="kv">검색어 ${esc(JSON.stringify(c.queries))}</div>
+      <div class="q" style="font-size:12px">${esc(c.note)}</div>
+      ${t.ytCandidates?.length ? `<h4 style="margin-top:8px">영상 후보 ${t.ytCandidates.length}개</h4>
+        <ul>${t.ytCandidates.map((v) => `<li class="${v.video_id === t.ytPickedId ? "picked" : ""}">
+          ${v.video_id === t.ytPickedId ? "→ " : ""}${esc(v.title)} <span class="q">/ ${esc(v.channel_name)}</span></li>`).join("")}</ul>` : ""}
+    </div>`);
+  }
+
+  if (!sec.length) sec.push(`<div class="tsec"><div class="q" style="font-size:12px">기록된 중간 단계가 없습니다.</div></div>`);
+  return `<details class="trace"><summary>판정 과정 (게이트 · RAG · 외부 API)</summary>
+    <div class="trace-body">${sec.join("")}</div></details>`;
+}
+
+function renderOut() {
+  const out = $("#out");
+  $("#usage").textContent = state.run
+    ? `${(state.run.elapsedMs / 1000).toFixed(1)}s · LLM ${state.run.usage.calls}회`
+    : "";
+
+  if (state.error) {
+    out.innerHTML = `<div class="err">${esc(state.error)}</div>`;
+    return;
+  }
+  if (!state.run) {
+    out.innerHTML = `<div class="empty">왼쪽에서 대화를 만들고 <b>분석 실행</b>을 누르세요.<br>
+      픽스처를 고르면 규격서 요청 형식 그대로 불러옵니다.</div>`;
+    return;
+  }
+
+  const res = state.run.response;
+  const results = res.results || [];
+  const mine = results.filter((r) => visibleTo(r, state.viewer));
+  const others = results.length - mine.length;
+
+  let html = `<div class="status">
+    <span class="pill ${res.status.toLowerCase()}">${res.status}</span>
+    <span>결과 ${results.length}건 · ${state.viewer} 화면에 ${mine.length}건 노출</span>
+  </div>`;
+
+  if (res.status === "FAILED") {
+    html += `<div class="err">${esc(res.errorCode)}\n${esc(res.errorMessage || "")}</div>`;
+  }
+
+  html += metricsHtml(state.run);
+  html += segmentsHtml(state.run.trace || {});
+  html += mine.map(widgetHtml).join("");
+
+  if (!mine.length && res.status !== "FAILED") {
+    html += `<div class="empty">이 화면에는 아무것도 뜨지 않습니다.<br>
+      <span style="font-size:12px">개입하지 않는 것도 정상 동작입니다.</span></div>`;
+  }
+  if (others > 0) {
+    html += `<div class="hidden-note">상대(${state.viewer === "A" ? "B" : "A"}) 화면에만 뜨는 결과 ${others}건이 있습니다.
+      ${state.viewer} 는 그런 게 떴다는 사실 자체를 모릅니다.</div>`;
+  }
+
+  const skipped = state.run.trace?.skipped || [];
+  if (skipped.length) {
+    html += `<div class="skips">${skipped.map((s) =>
+      `<div>· ${esc(CAND_LABEL[s.candidate] || s.candidate)} — ${esc(s.reason)}</div>`).join("")}</div>`;
+  }
+
+  html += traceHtml(state.run.trace);
+  html += `<details class="trace"><summary>응답 JSON (규격서 그대로)</summary>
+    <div class="trace-body"><pre class="raw">${esc(JSON.stringify(res, null, 2))}</pre></div></details>`;
+
+  out.innerHTML = html;
+}
+
+// ---------------------------------------------------------------- 시작
+renderRoom();
+loadFixtures();
+$("#input").focus();
+</script>
+</body>
+</html>
