@@ -250,7 +250,7 @@ LLM 이 시간대를 판단할 수 있다 — 데이트 코스가 "밤 10시에 
 | 함수 | 하는 일 |
 | --- | --- |
 | `check_tone_gate()` | 마지막 메시지 1개에서 신호 6종을 찾는다. 확정하지 않고 후보만 잡는다 |
-| `tone_judge()` | LLM — 진짜 갈등인가, 맥락상 장난인가 |
+| `tone_judge()` | LLM — 진짜 갈등인가, 맥락상 장난인가. 마지막 1개 + 직전 `CONTEXT_TURNS = 3`턴 |
 | `tone_suggest()` | LLM — 진단 + 대체 문장 + 이유 |
 | `profile.resolve_profile()` | 말투 기준선. 시드 있으면 시드, 없으면 대화에서 계산 |
 | `profile.addresses_in()` | 어절 단위 호칭 탐지 |
@@ -269,7 +269,7 @@ LLM 이 시간대를 판단할 수 있다 — 데이트 코스가 "밤 10시에 
 | --- | --- |
 | `check_date_gate()` | 활성 세그먼트에서 데이트 의도 4종 정규식 |
 | `plan_date()` | LLM — 지역 + 검색어 2~4개 + 코스 의도. **장소를 지어내지 않는다** |
-| `build_course()` | 검색어 순서대로 카카오에서 장소를 확정. 중복 제외 |
+| `build_course()` | 카카오에서 장소를 확정. 중복 제외. **`MIN_PLACES = 2` 곳을 못 채우면 미발동** |
 | `write_reason()` | LLM — 확정된 상호를 보고 코스명·요약·추천 이유·장소 설명 |
 | `to_result()` | `mainPlace`(order 없음) + `coursePlaces`(order 1..n) 조립 |
 | `places.search_places()` | 카카오 로컬 키워드 검색 |
@@ -370,7 +370,7 @@ LLM 호출을 둘로 나눈 이유: 최대 리스크는 **장난을 갈등으로
 check_date_gate()  룰 — 데이트 의도 4종
 retrieve_many()    RAG — 맥락과 유사한 기억 여러 건
 plan_date()        LLM — 지역 + 검색어 + 코스 의도 (장소를 지어내지 않는다)
-build_course()     카카오 로컬 — 실재하는 장소로 코스를 채운다
+build_course()     카카오 로컬 — 실재하는 장소로 코스를 채운다 (2곳 미만이면 미발동)
 write_reason()     LLM — 확정된 상호를 보고 코스명·요약·추천 이유
 ```
 

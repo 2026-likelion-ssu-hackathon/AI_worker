@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tools.run", description="kakapo 워커 러너")
     parser.add_argument("fixtures", nargs="+", type=Path)
     parser.add_argument("--verbose", "-v", action="store_true",
-                        help="게이트 판정, 검색된 기억, 외부 API 결과 표시")
+                        help="분절 점수, 게이트 판정, 검색된 기억, 외부 API 결과 표시")
     parser.add_argument("--no-persist", action="store_true",
                         help="used_at / 기억 저장을 파일에 쓰지 않는다 (반복 시연용)")
     parser.add_argument("--json", action="store_true",
