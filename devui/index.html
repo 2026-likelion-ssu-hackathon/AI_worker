@@ -892,7 +892,9 @@ function traceHtml(t) {
         <ul>${t.dateMemories.map((m) => `<li>${m.used_at ? "*" : ""}[${esc(m.kind)}] ${esc(m.content)}</li>`).join("")}</ul>` : ""}
       ${p ? `<h4 style="margin-top:8px">계획</h4>
         <div class="kv">should_recommend=${p.should_recommend} · region=${esc(p.region)}</div>
-        <div class="kv">검색어 ${esc(JSON.stringify(p.queries))}</div>
+        <div class="kv">밥 ${esc(JSON.stringify(p.meal_queries || []))}
+          · 구경 ${esc(JSON.stringify(p.sight_queries || []))}
+          · 카페 ${esc(JSON.stringify(p.cafe_queries || []))}</div>
         <div class="q" style="font-size:12px">${esc(p.reason_seed)}</div>` : ""}
       ${t.datePlaces?.length ? `<h4 style="margin-top:8px">카카오 검색 결과</h4>
         <ul>${t.datePlaces.map((x) => `<li>${esc(x.name)} — <span class="q">${esc(x.category_name)}</span></li>`).join("")}</ul>` : ""}

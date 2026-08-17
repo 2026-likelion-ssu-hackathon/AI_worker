@@ -23,7 +23,7 @@ from worker.models import (
     ToneResultData,
     YoutubeResultData,
 )
-from worker import segment, state
+from worker import date_course, segment, state
 from worker.llm import USAGE
 from worker.pipeline import Trace, analyze
 
@@ -97,7 +97,8 @@ def _show_trace(trace: Trace) -> None:
                 print(f"           {mark}[{m.kind}] {m.content}")
         if (dp := trace.date_plan) is not None:
             print(f"  데이트계획 should_recommend={dp.should_recommend} region={dp.region}")
-            print(f"           검색어 {dp.queries}")
+            for label, _, qs in date_course.slot_queries(dp):
+                print(f"           {label} {qs}")
             print(f"           {DIM}{dp.reason_seed}{OFF}")
         if trace.date_places:
             print("  카카오 검색 결과")

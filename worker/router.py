@@ -248,7 +248,7 @@ class DateCandidate:
             return None
 
         region = None if plan.region.strip().lower() in ("", "none") else plan.region.strip()
-        course = date_course.build_course(plan.queries, region)
+        course = date_course.build_course(plan, region)
 
         # 최근에 이미 추천한 장소는 뺀다. 같은 커플에게 매번 같은 코스를 주지 않는다.
         # 서버가 `recentResults` 를 안 보내면 빈 집합이라 아무것도 안 걸러진다.

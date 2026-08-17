@@ -423,7 +423,13 @@ class DatePlanLLMOutput(BaseModel):
     scope: Literal["common", "individual"]
     target: Literal["A", "B", "none"]
     region: str          # 검색 지역 ("성수동", "연남동"). 모르면 "none"
-    queries: list[str]   # 카카오 로컬 검색어. 코스 순서대로 5개 (3곳 + 예비 2)
+
+    # 코스는 **밥 → 구경 → 카페 세 자리로 고정**이다 (`date_course.SLOTS`).
+    # 한 자리에 검색어를 2개씩 받는다 — 카카오가 0건을 주거나 카테고리가 안 맞으면
+    # 두 번째를 쓴다. 슬롯이 없으면 카페가 두 곳 나오는 코스가 만들어진다 (실측).
+    meal_queries: list[str]   # 밥 — 식당 검색어 2개
+    sight_queries: list[str]  # 구경 — 문화시설·명소·소품샵 검색어 2개
+    cafe_queries: list[str]   # 카페 — 검색어 2개
     course_name: str
     course_summary: str
     reason_seed: str     # 어떤 발화·시점을 근거로 삼았는지 (원문 인용 포함)

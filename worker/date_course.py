@@ -39,18 +39,30 @@ from worker.models import (
 from worker.places import KakaoPlace, region_center, search_places
 from worker.text import format_transcript
 
-# 코스에 넣을 장소 수 — **고정이다.** 2곳만 나오는 요청과 3곳 나오는 요청이 섞이면
-# 화면이 요청마다 달라 보인다 (2026-08-17 결정).
-COURSE_PLACES = 3
-
-# LLM 에게 받는 검색어 수. 3개가 아니라 **5개를 받는다.**
+# 코스 구성 — **밥 → 구경 → 카페 세 자리로 고정이다** (2026-08-17 결정).
 #
-# 카카오 검색은 검색어에 따라 0건이 나온다 (`분위기 좋은 카페` 같은 수식어, 지역에 그
-# 업종이 없는 경우). 3개만 받으면 하나만 비어도 코스가 2곳이 된다.
+# 검색어만 순서대로 받아 앞에서부터 채웠더니 **카페가 두 곳 나오는 코스**가 만들어졌다
+# (`case9_date` 실측 — `브런치` 검색이 카페를 물어와 카페 → 카페 → 서울숲). 검색어에는
+# 업종이 담겨 있어도 카카오가 그 업종으로 준다는 보장이 없다.
+#
+# 그래서 자리마다 **허용 카테고리를 강제한다.** 검색 결과에서 그 카테고리가 아닌 것은
+# 아예 후보에서 뺀다. 자리 수가 곧 코스 길이라 2곳/3곳이 섞이지도 않는다.
+#
+#     (키, 화면에서 부르는 이름, 허용 카테고리)
+SLOTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("meal", "밥", ("RESTAURANT",)),
+    ("sight", "구경", ("CULTURE", "ATTRACTION", "SHOP", "ACTIVITY")),
+    ("cafe", "카페", ("CAFE",)),
+)
+
+COURSE_PLACES = len(SLOTS)
+
+# 한 자리에 받는 검색어 수. **2개인 이유는 0건 대비다** —
+# 카카오는 수식어가 붙거나 그 지역에 그 업종이 없으면 빈 목록을 준다.
 #
 # **파이썬이 대체 검색어를 지어내지 않는다.** 그러면 "무엇을 찾을지는 LLM" 이라는 역할
-# 구분이 깨진다. 예비까지 LLM 에게 받고, 파이썬은 순서대로 시도해 3개를 채우기만 한다.
-MAX_QUERIES = 5
+# 구분이 깨진다. 예비까지 LLM 에게 받고, 파이썬은 순서대로 시도하기만 한다.
+QUERIES_PER_SLOT = 2
 
 # 기억을 몇 건까지 근거로 넘길지
 MEMORY_K = 6
@@ -200,12 +212,47 @@ def _fits_intent(place: KakaoPlace, query: str) -> bool:
     return any(t in haystack for t in _intent_tokens(query))
 
 
-def _choose(found: list[KakaoPlace], query: str, taken: set[str]) -> KakaoPlace | None:
-    """검색 결과에서 한 곳을 고른다. 이미 쓴 상호는 뺀다."""
-    fresh = [p for p in found if p.name not in taken]
+def _choose(
+    found: list[KakaoPlace], query: str, taken: set[str], allowed: tuple[str, ...] = ()
+) -> KakaoPlace | None:
+    """검색 결과에서 한 곳을 고른다. 이미 쓴 상호와 **자리에 안 맞는 카테고리**는 뺀다.
+
+    `allowed` 가 비어 있으면 카테고리를 보지 않는다 (슬롯 밖에서 쓸 때).
+    """
+    fresh = [
+        p for p in found
+        if p.name not in taken and (not allowed or p.category in allowed)
+    ]
     if not fresh:
         return None
     return next((p for p in fresh if _fits_intent(p, query)), fresh[0])
+
+
+def slot_queries(plan: DatePlanLLMOutput) -> list[tuple[str, tuple[str, ...], list[str]]]:
+    """`(자리 이름, 허용 카테고리, 검색어들)` — 자리 순서대로."""
+    by_key = {
+        "meal": plan.meal_queries,
+        "sight": plan.sight_queries,
+        "cafe": plan.cafe_queries,
+    }
+    return [
+        (label, allowed, [q.strip() for q in by_key[key][:QUERIES_PER_SLOT] if q.strip()])
+        for key, label, allowed in SLOTS
+    ]
+
+
+def _fill_slot(
+    slot_found: list[list[KakaoPlace]],
+    queries: list[str],
+    allowed: tuple[str, ...],
+    taken: set[str],
+) -> KakaoPlace | None:
+    """한 자리를 채운다. 첫 검색어가 비면 예비 검색어로 넘어간다."""
+    for found, query in zip(slot_found, queries):
+        picked = _choose(found, query, taken, allowed)
+        if picked is not None:
+            return picked
+    return None
 
 
 def _search_all(
@@ -223,83 +270,67 @@ def _search_all(
         ))
 
 
-def build_course(queries: list[str], region: str | None) -> list[KakaoPlace]:
-    """검색어 순서대로 장소를 하나씩 확정한다. 같은 장소가 겹치지 않게 한다.
+def build_course(plan: DatePlanLLMOutput, region: str | None) -> list[KakaoPlace]:
+    """**밥 → 구경 → 카페** 세 자리를 채운다. 자리마다 카테고리를 강제한다.
 
-    검색어 의도에 맞는 결과를 우선하고, 하나도 없으면 1위 결과로 물러선다
-    (`카페` 처럼 업종명이 상호·카테고리에 안 뜨는 검색어가 있다).
+    자리 하나에 검색어가 2개 있고, 첫 검색어가 0건이거나 카테고리가 안 맞으면 두 번째를
+    쓴다. 검색어 의도에 맞는 결과를 우선하고, 하나도 없으면 (카테고리가 맞는 것 중) 1위로
+    물러선다 — `카페` 처럼 업종명이 상호에 안 뜨는 검색어가 있다.
 
-    **지역명을 못 잡았을 때는 첫 장소를 코스의 중심으로 삼는다.** 안 그러면 검색어마다
+    **지역명을 못 잡았을 때는 첫 장소(밥)를 코스의 중심으로 삼는다.** 안 그러면 자리마다
     전국에서 독립적으로 고르게 되고, 실측에서 `영화관 / 필름 현상 / 카페` 가
     **용산 → 미상 → 남양주 북한강**으로 흩어졌다. 차로 한 시간 넘는 곳들이라 코스가 아니다.
     `search_places` 의 반경 방어는 지역명이 있을 때만 걸리므로, 없을 때는 여기서 건다.
 
-    지역명이 있으면 기존대로 지역 중심 반경을 쓴다 — 그쪽은 이미 의도대로 동작한다.
-
-    **`COURSE_PLACES` 개가 차면 멈춘다.** 검색어를 예비까지 받아오므로 앞쪽이 0건이어도
-    뒤에서 채워진다. 순서는 검색어 순서를 지키니 밥 → 구경 → 카페 흐름이 깨지지 않는다.
+    한 자리라도 못 채우면 **짧은 코스를 만들지 않고 그대로 돌려준다** — 호출부가 길이를
+    보고 미발동시킨다. 억지로 먼 곳이나 엉뚱한 업종을 끼워 넣으면 코스가 아니게 된다.
     """
-    queries = list(queries[:MAX_QUERIES])
-    if not queries:
+    slots = slot_queries(plan)
+    if not any(queries for _, _, queries in slots):
         return []
 
     course: list[KakaoPlace] = []
     taken: set[str] = set()
 
-    def _take(found: list[KakaoPlace], query: str) -> bool:
-        """골라 담는다. 코스가 다 찼으면 True."""
-        if (picked := _choose(found, query, taken)) is not None:
+    def _search(targets, center):
+        """자리별 검색어를 **한꺼번에** 던지고 자리별로 다시 묶는다."""
+        flat = [q for _, _, queries in targets for q in queries]
+        if not flat:
+            return []
+        found = _search_all(flat, region if center is None else None, center)
+        out, i = [], 0
+        for _, _, queries in targets:
+            out.append(found[i:i + len(queries)])
+            i += len(queries)
+        return out
+
+    def _take(slot, slot_found) -> None:
+        _, allowed, queries = slot
+        picked = _fill_slot(slot_found, queries, allowed, taken)
+        if picked is not None:
             course.append(picked)
             taken.add(picked.name)
-        return len(course) >= COURSE_PLACES
 
-    # 지역명이 있으면 검색끼리 의존이 없다 — 전부 동시에 던진다.
+    # 지역명이 있으면 자리끼리 의존이 없다 — 전부 동시에 던진다.
     # 좌표 조회를 미리 한 번 돌려 `lru_cache` 를 데운다. 안 그러면 병렬 호출이 같은 지역
     # 조회를 동시에 중복해서 날린다.
     if region is not None:
         region_center(region)
-        for query, found in zip(queries, _search_all(queries, region, None)):
-            if _take(found, query):
-                break
+        for slot, slot_found in zip(slots, _search(slots, None)):
+            _take(slot, slot_found)
         return course
 
-    # 지역명이 없으면 **첫 장소가 코스의 중심**이라 그것만 먼저 확정해야 한다.
-    # 첫 검색어가 0건이면 다음 검색어로 중심을 잡는다 — 여기서 못 잡으면 뒤 검색이
-    # 전국에서 흩어진다.
-    anchor: tuple[str, str] | None = None
-    rest = queries
-    for i, query in enumerate(queries):
-        head = _choose(search_places(query, region=None), query, taken)
-        if head is None:
-            continue
-        course.append(head)
-        taken.add(head.name)
-        if head.x and head.y:
-            anchor = (head.x, head.y)
-        rest = queries[i + 1:]
-        break
-    else:
-        return course
+    # 지역명이 없으면 **첫 자리(밥)가 코스의 중심**이라 그것만 먼저 확정해야 한다.
+    head_slot = slots[0]
+    head_found = [search_places(q, region=None) for q in head_slot[2]]
+    _take(head_slot, head_found)
+    if not course:
+        return []  # 중심을 못 잡으면 뒤 자리가 전국에서 흩어진다
 
-    if not rest or len(course) >= COURSE_PLACES:
-        return course
-
-    if anchor is None:
-        # 중심 좌표를 못 잡았다. 원래대로 순차로 돌면서 잡는다 (드문 경우).
-        for query in rest:
-            found = search_places(query, region=None, center=anchor)
-            if (picked := _choose(found, query, taken)) is not None:
-                course.append(picked)
-                taken.add(picked.name)
-                if anchor is None and picked.x and picked.y:
-                    anchor = (picked.x, picked.y)
-                if len(course) >= COURSE_PLACES:
-                    break
-        return course
-
-    for query, found in zip(rest, _search_all(rest, None, anchor)):
-        if _take(found, query):
-            break
+    anchor = (course[0].x, course[0].y) if course[0].x and course[0].y else None
+    rest = list(slots[1:])
+    for slot, slot_found in zip(rest, _search(rest, anchor)):
+        _take(slot, slot_found)
     return course
 
 
