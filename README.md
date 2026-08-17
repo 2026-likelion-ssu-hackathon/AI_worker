@@ -10,6 +10,8 @@
 | [`docs/contract-review.md`](docs/contract-review.md) | 규격서에 대한 워커 답변 + 확인 요청 |
 | [`docs/spec-v2.md`](docs/spec-v2.md) | PM 기능 명세 3종 |
 | [`docs/segmentation-v3.md`](docs/segmentation-v3.md) | 대화 분절 설계 + 실측 근거 |
+| [`docs/state-display-v4.md`](docs/state-display-v4.md) | 실 상태 표현 — 위젯 ①번 줄 설계 + 프론트 연동 |
+| [`docs/server-handoff-v5.md`](docs/server-handoff-v5.md) | 서버 담당자 전달 문서 (실 상태 표현) |
 | [`docs/eval-dataset-v1.md`](docs/eval-dataset-v1.md) | 기억/RAG 평가셋 전처리 |
 | [`docs/worker-tasks.md`](docs/worker-tasks.md) | 작업 지시 / 진행 상황 |
 
@@ -90,6 +92,10 @@ CLI 와 **같은 진입점**(`worker.pipeline.analyze`)을 부르는 로컬 확�
 - 프롬프트 — 문구를 **생성**한다. 왜 개입하는지는 모른다
 - `filter.py` — 그럼에도 금지어가 새어나오면 **문자열 검사로 막는다**
 
+**상시 노출되는 ①번 줄만 방식이 다르다.** 문구를 생성하지 않고 `copy.STATE_TEXT` 사전
+5개에서 고른다 — 위반 확률이 1000분의 1이어도 하루 수백 번 뜨는 자리면 반드시 나온다.
+사전은 임포트 시점에 10자·어미·금지어를 검사한다.
+
 ### 헷갈리기 쉬운 경계
 
 금지 대상은 **관계 상태를 규정하는 말**이다. 감정 상태 언급 전부가 아니다.
@@ -122,14 +128,31 @@ router.split()            대화 분절 — 화제 단위로 끊는다
    │                      ① 3시간 룰 컷  ② LLM 채점  ③ 임계값 판정
    │                      이후 단계는 전부 **활성 세그먼트(마지막)** 만 본다
    ↓
-router.harvest_memories() 기억 추출 → 저장 (활성 세그먼트, 후보들보다 먼저 돈다)
-   ↓
-router.route()            후보 3개를 돌려 results 배열을 만든다
-   ↓
-filter                    금지어 하드 필터
+router.run()              분절 이후를 병렬로 — 독립인 것은 동시에
+   │  ├ read_state()      실 상태 표현 — 위젯 ①번 줄 (게이트 없음, 매 요청)
+   │  ├ 말투 판정 → 생성
+   │  └ 기억 추출 → 데이트 계획 → 카카오 → 데이트 문구
+   │                └ 유튜브 (말투 결과를 본 뒤)
+   ↓                      후보 결과는 우선순위 순 정렬 — 위젯 ②번 줄
+filter                    금지어 하드 필터 (①·②번 줄 둘 다)
    ↓
 AnalysisResponse          COMPLETED / SKIPPED / FAILED
 ```
+
+의존은 둘뿐이라 그 둘만 순서를 지킨다 — **기억 추출 → 데이트**(방금 한 발화가 같은 요청의
+추천에 반영되어야 한다), **말투 → 유튜브**(`SUPPRESS_YOUTUBE_WHEN_TONE` 판단).
+실측에서 요청당 **16~32%** 줄었고, 결과와 호출 횟수는 순차 실행과 동일하다.
+
+### 위젯은 두 줄이고 응답의 배열도 두 개다
+
+```
+① 서운해 보여요            ← emotionAnalyses · 상시. 비지 않는다
+② 카카포가 추천하는 …       ← results · 3종 미발동이면 빈 줄
+```
+
+**두 줄은 자리를 다투지 않는다.** 3종이 전부 미발동이어도 ②만 비고 ①은 남는다.
+그래서 ②의 빈 줄은 정상 상태고, ①의 빈 줄은 사고다.
+설계는 `docs/state-display-v4.md`.
 
 ### LLM 과 외부 API 의 역할 분담 — 이 설계의 핵심
 
@@ -167,16 +190,19 @@ strict json_schema 가 nullable·date-time 을 잘 못 다뤄서 sentinel 문자
 **`pipeline.py`** — 파싱 실패 → `INVALID_REQUEST`, 참여자 목록에 없는 발화자 → `INVALID_PARTICIPANT`,
 그 외 예외 → `MODEL_ERROR`. **예외를 밖으로 던지지 않는다.** 워커가 죽으면 채팅 서버가
 타임아웃까지 붙잡혀 있게 된다. 메시지를 `(sent_at, message_id)` 로 정렬해 `Context` 를 만들고,
-`split()` → `harvest_memories()` → `route()` 순으로 부른다. 결과가 0건이면 `SKIPPED`.
+`split()` → `harvest_memories()` → `read_state()` → `route()` 순으로 부른다.
+`results` 와 `emotionAnalyses` 가 **둘 다** 비었을 때만 `SKIPPED` 다 — 실 상태 표현이
+상시라 실제로는 거의 `COMPLETED` 로 나간다.
 
 ### 배선 · 안전장치
 
 | 파일 | 하는 일 |
 | --- | --- |
 | `segment.py` | 대화 분절. 스트림을 화제 단위로 끊는다 (모든 단계보다 먼저) |
+| `state.py` | 실 상태 표현. 위젯 ①번 줄을 매 요청 만든다 (게이트 없음) |
 | `router.py` | 후보 3개를 순서대로 돌려 `results` 배열을 만든다. `Context` / `Trace` 정의 |
 | `filter.py` | 금지어 하드 필터 |
-| `copy.py` | `guideMessage` 고정 문구 3종. PM·디자인 소유 |
+| `copy.py` | `guideMessage` 고정 문구 3종 + 상태 문구 사전 5종. PM·디자인 소유 |
 
 **`segment.py`** — ① 3시간 이상 공백에서 룰로 자르고 ② **마지막 조각만** LLM 이 채점하고
 ③ 임계값으로 자른다(호출 1회). 앞 조각은 라우팅에 안 쓰이므로 나눌 이유가 없다.
@@ -200,17 +226,50 @@ LLM 은 **점수와 참/거짓만** 낸다 — 근거 문구를 받지 않는다
 실측했고 셋 다 무너졌다(`docs/segmentation-v3.md` 5장). 룰을 추가하려면 먼저 재볼 것.
 
 **`router.py`** — 후보는 `build(ctx) -> AiResult | None` 만 구현하면 되고, `CANDIDATES` 리스트가
-실행 순서 겸 우선순위다. `SUPPRESS_YOUTUBE_WHEN_TONE = True` 가 말투 교정이 뜬 요청에서
-유튜브를 건너뛴다. `split()` 이 맨 먼저 돌아 이후 단계가 볼 범위를 정하고, `harvest_memories()`
-가 후보들보다 **먼저** 돌아서 방금 한 발화가 같은 요청의 데이트 코스에 반영된다.
+우선순위다. `SUPPRESS_YOUTUBE_WHEN_TONE = True` 가 말투 교정이 뜬 요청에서 유튜브를 건너뛴다
+(호출 자체를 안 만든다 — 쿼터가 하루 95회다). `split()` 이 맨 먼저 돌아 이후 단계가 볼 범위를
+정하고, `harvest_memories()` 가 데이트보다 **먼저** 돌아서 방금 한 발화가 같은 요청의 데이트
+코스에 반영된다.
+
+**`run()` 이 병렬 실행기다.** 스레드 4개로 독립인 단계를 겹쳐 돌리고, 위 의존 둘만 순서를
+지킨다. LLM·HTTP 대기가 전부라 스레드로 충분하다. **결과 배열은 완료 순서가 아니라
+`CANDIDATES` 우선순위로 다시 담는다** — 완료 순서로 담으면 요청마다 순서가 바뀌고,
+프론트가 `results[0]` 을 쓰기로 하면 화면이 달라진다. `route()` 는 같은 규칙의 순차 폴백으로
+남겨뒀다(원인 좁힐 때 쓴다). 병렬이라 `USAGE` 는 락을 잡고, **`records` 의 시간 합은
+벽시계보다 크다** — "LLM 에 쓴 시간의 총합"이지 "요청이 걸린 시간"이 아니다.
 **후보 3개는 전부 `ctx.active`(활성 세그먼트)만 본다** — 말투 판정 프롬프트의 직전 대화만
 `ctx.context`, 말투 기준선만 `ctx.messages`(전체)를 쓴다.
 `Trace` 는 `--verbose` 출력 전용이고 판정에 관여하지 않는다.
+
+**`state.py`** — 위젯 ①번 줄. **게이트가 없고 매 요청 돈다.** 후보가 아니라서 `CANDIDATES` 에
+없고, 결과도 `results` 가 아니라 `emotionAnalyses` 로 나간다 — 화면이 두 줄이라 배열도 두 개다.
+
+**LLM 은 감정 4축 점수(`affection` · `hurt` · `joy` · `anger`, 각 0~5)까지만 낸다.**
+라벨은 `pick_label()` 이 임계값으로 정하고 문구는 `copy.STATE_TEXT` 사전에서 찾는다 —
+분절과 같은 패턴이다. 라벨을 LLM 이 고르게 했다가 `case11_mixed` 에서 말투 교정과 상태
+산출이 한 발화를 다르게 읽어서 바꿨다. 손잡이는 `MIN_SCORE=3`(이 아래면 `STABLE`) ·
+`ANGER_WINS=3`(분노가 이 이상이면 다른 축보다 낮아도 `ESCALATED`) · `PRIORITY`(동점 순서).
+**`STABLE` 에 해당하는 축은 두지 않는다** — `calm` 을 뒀더니 모델이 바닥값으로 깔아 다른
+축을 전부 먹었다. 네 축이 전부 임계 아래인 게 평온이다.
+
+화면 문구를 생성시키지 않는 이유는 따로다. 상시 노출이라 자유 생성은 절대 제약 위반
+확률을 매 요청 곱한다 — 사전이면 위반 확률이 0 이고 10자·어미 규격이 구조적으로 보장된다.
+
+`confident=false` 거나 그 사람 발화가 없으면 `STABLE` 로 내린다 — **근거 없이 감정을
+지어내면 없던 갈등을 만든다.** 발화가 아예 없을 때만 `shouldShow=false` 라 프론트가 직전
+문구를 유지한다. 호출 실패는 오류가 아니라 "갱신 없음"이다.
+`subject`(감정의 주인)와 `viewer`(보는 사람)가 달라서 **A 화면과 B 화면의 내용이 다르다.**
 
 **`filter.py`** — `BANNED` 18개 문자열. `visible_texts()` 가 결과 종류별로 **화면에 나가는 문자열을
 전부** 뽑아 검사하는데, 여기에 **유튜브 영상 제목·`videoSummary` 가 포함된다.** 우리가 쓴 문장이
 아니어도 사용자는 화면에서 '권태기'를 읽기 때문이다. 감정 표현은 막지 않고
 사람 평가("무례하시네요")는 프롬프트가 다룬다 — 단어 목록으로 구분할 수 없는 영역이다.
+`AiResult`(②번 줄) 말고 `EmotionAnalysis`(①번 줄)도 `banned_in_state()` 로 따로 검사한다 —
+`visible_texts()` 는 `AiResult` 만 보므로 그냥 두면 상태 문구가 필터를 통과한다.
+
+**`copy.py`** — 임포트 시점에 `STATE_TEXT` 사전 5개를 검사한다(10자 · 어미 · 금지어).
+문구가 상수라는 건 미리 전부 검사할 수 있다는 뜻이다 — PM 이 문구를 바꿔도 규격 위반이면
+그 자리에서 터진다. 화면에 나간 뒤에 발견하지 않는다.
 
 ### 공용 — 후보 3개가 같이 쓴다
 
@@ -306,11 +365,12 @@ LLM 이 시간대를 판단할 수 있다 — 데이트 코스가 "밤 10시에 
 
 ### 프롬프트 (`worker/prompts/*.md`)
 
-`load_prompt(name)` 이 파일명으로 읽어 system 메시지로 넣는다. 8개 전부 살아 있다.
+`load_prompt(name)` 이 파일명으로 읽어 system 메시지로 넣는다. 9개 전부 살아 있다.
 
 | 파일 | 쓰는 곳 |
 | --- | --- |
 | `segment.md` | 대화 분절 (발화별 연속성 채점) |
+| `state.md` | 실 상태 표현 (화자별 상태 라벨 채점) |
 | `extract.md` | 기억 추출 |
 | `tone_judge.md` / `tone_suggest.md` | 갈등 중재 (판정 / 생성) |
 | `date_plan.md` / `date_reason.md` | 데이트 코스 (계획 / 문구) |

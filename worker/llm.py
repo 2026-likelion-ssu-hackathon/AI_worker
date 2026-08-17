@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from functools import lru_cache
 from typing import NamedTuple, TypeVar
@@ -55,25 +56,37 @@ class Usage:
 
     `records` 에 호출별로 남긴다. 합계만 보면 어느 단계가 느린지 알 수 없어서 —
     분절이 붙은 뒤로는 "요청당 몇 초"보다 "어느 단계가 몇 초"가 더 필요해졌다.
+
+    ⚠️ **`router.run()` 이 단계를 병렬로 돌리므로 여러 스레드가 동시에 `add()` 를 부른다.**
+    `+=` 는 원자적이지 않아서 락 없이 두면 카운트가 새고, `records` 도 순서가 아니라
+    **개수**가 어긋난다. 그래서 락을 건다 — 호출당 한 번이라 경합 비용은 없다.
+
+    `seconds` 의 합은 병렬 실행에서 **벽시계 시간보다 크다.** "LLM 에 쓴 시간의 총합"이지
+    "요청이 걸린 시간"이 아니다. 화면에서 그렇게 표시할 것.
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self.calls = 0
         self.input = 0
         self.output = 0
         self.records: list[Call] = []
 
     def add(self, meta: dict | None, stage: str = "", seconds: float = 0.0) -> None:
-        self.calls += 1
         got_in = meta.get("input_tokens", 0) if meta else 0
         got_out = meta.get("output_tokens", 0) if meta else 0
-        self.input += got_in
-        self.output += got_out
-        self.records.append(Call(stage=stage, seconds=seconds, input=got_in, output=got_out))
+        with self._lock:
+            self.calls += 1
+            self.input += got_in
+            self.output += got_out
+            self.records.append(
+                Call(stage=stage, seconds=seconds, input=got_in, output=got_out)
+            )
 
     def reset(self) -> None:
-        self.calls = self.input = self.output = 0
-        self.records = []
+        with self._lock:
+            self.calls = self.input = self.output = 0
+            self.records = []
 
     def __str__(self) -> str:
         return f"LLM {self.calls}회 · 입력 {self.input:,} 토큰 · 출력 {self.output:,} 토큰"

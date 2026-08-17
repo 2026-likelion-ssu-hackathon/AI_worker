@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT))
 
 from pydantic import BaseModel  # noqa: E402
 
-from worker import segment  # noqa: E402
+from worker import segment, state  # noqa: E402
 from worker.llm import USAGE  # noqa: E402
 from worker.pipeline import Trace, analyze  # noqa: E402
 
@@ -136,6 +136,17 @@ def _trace_json(trace: Trace) -> dict:
         },
         "extracted": _jsonable(trace.extracted),
         "savedIds": [m.id for m in trace.saved],
+        # 실 상태 표현 — 감정 점수와 **거기서 룰이 고른 라벨.**
+        # 판정을 코드로 옮긴 값어치가 여기서도 보인다. `note` 는 내부용이라 화면 문구가 아니다.
+        "stateScored": [
+            {**_jsonable(s), "label": state.pick_label(s)[0], "intensity": state.pick_label(s)[1]}
+            for s in trace.state_scored
+        ],
+        "stateThresholds": {
+            "minScore": state.MIN_SCORE,
+            "angerWins": state.ANGER_WINS,
+            "priority": list(state.PRIORITY),
+        },
         "toneGate": _jsonable(trace.tone_gate),
         "toneJudged": _jsonable(trace.tone_judged),
         "dateGate": _jsonable(trace.date_gate),
@@ -177,8 +188,11 @@ def _run(payload: dict, persist: bool) -> dict:
             "calls": len(records),
             "input": sum(r.input for r in records),
             "output": sum(r.output for r in records),
+            # ⚠️ **LLM 시간의 합계지 요청이 걸린 시간이 아니다.** `router.run()` 이 단계를
+            # 병렬로 돌려서 이 값이 `elapsedMs` 보다 클 수 있다. 화면에서 "합계"로 표시한다.
             "llmMs": round(llm_seconds * 1000),
             # 외부 API(카카오·유튜브)와 룰·파일 I/O. 따로 계측하지 않고 차로 낸다.
+            # 병렬 실행에서는 LLM 대기와 겹쳐서 0 으로 떨어질 수 있다 — 안 걸렸다는 뜻이 아니다.
             "otherMs": max(0, round((elapsed - llm_seconds) * 1000)),
             "stages": [
                 {

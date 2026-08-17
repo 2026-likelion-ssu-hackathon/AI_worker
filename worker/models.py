@@ -39,6 +39,21 @@ VisibilityType = Literal["INDIVIDUAL", "COUPLE"]
 ContentType = Literal["TEXT", "LINK", "MIXED"]
 Status = Literal["COMPLETED", "SKIPPED", "FAILED"]
 
+# 실 상태 표현의 상태 라벨 (`docs/state-display-v4.md` 6장, 디자인 확정 5종).
+#
+# **규격서 11장 `emotionType` 에 이 값을 넣는다.** 필드 이름은 감정인데 값은 상태 라벨이다 —
+# 디자인 확정안의 축이 이쪽이고 실 모양·글로우와 1:1 이라 프론트가 그대로 쓴다.
+# 감정 이름 쪽("Calm / Neutral")은 슬래시가 들어가 enum 이 되지 않는다.
+#
+# 추이(쌓임·풀어짐)가 **라벨 안에 이미 들어 있다.** 별도의 trend 축을 만들지 않는다.
+StateLabel = Literal[
+    "STABLE",       # 평온·기본 — 아래로 축 늘어진 곡선 / 무채색
+    "RESOLVED",     # 애정·설렘, 감정 풀어짐 — 하트 매듭 / 핑크·마젠타
+    "ACCUMULATED",  # 서운함·오해, 감정 쌓임 — 엉킨 매듭 / 파랑
+    "ENGAGED",      # 들뜸·활기, 대화 활발 — 크고 규칙적인 파동 / 초록
+    "ESCALATED",    # 분노·격앙, 감정 격해짐 — 날카로운 스파이크 / 빨강
+]
+
 ErrorCode = Literal[
     "INVALID_REQUEST",
     "INVALID_PARTICIPANT",
@@ -103,11 +118,45 @@ class Message(Camel):
         return as_kst(v)
 
 
+class RecentResult(Camel):
+    """최근에 이미 내보낸 결과 (규격서 협의분, 2026-08-17 합의).
+
+    규격서 10장의 "동일 영상을 최근에 추천한 경우 다른 후보 탐색"을 지킬 유일한 수단이다.
+    워커는 동기 REST 요청마다 상태가 없어서, 서버가 실어주지 않으면 방법이 없다.
+
+    `reference_key` 는 유튜브면 `videoId`, 데이트면 `mainPlace.name`.
+    """
+
+    result_type: ResultType
+    reference_key: str
+    created_at: datetime | None = None
+
+
+class SpeakerProfileInput(Camel):
+    """서버가 집계해 실어주는 화자별 평소 말투 기준선 (2026-08-17 합의 — 우선 목데이터).
+
+    다섯 값 전부 저장된 메시지에서 기계적으로 나오는 값이라 LLM 이 필요 없다.
+    내부 계산은 `worker/profile.py` 가 같은 산식을 쓴다.
+    """
+
+    participant_key: ParticipantKey
+    avg_length: float = 0.0
+    period_rate: float = 0.0
+    laugh_per_msg: float = 0.0
+    emoji_rate: float = 0.0
+    top_address: list[str] = Field(default_factory=list)
+
+
 class AnalysisRequest(Camel):
     analysis_request_id: str
     chat_room_id: int
     participants: list[Participant]
     messages: list[Message]
+
+    # 규격서 초안 v1 에는 없고 협의로 추가된 필드들. **둘 다 선택이다** —
+    # 서버가 안 보내면 지금까지처럼 시드·폴백으로 동작한다 (`docs/contract-review.md` 1·2번).
+    recent_results: list[RecentResult] = Field(default_factory=list)
+    speaker_profiles: list[SpeakerProfileInput] = Field(default_factory=list)
 
     # 규격서에 없는 선택 필드다. **서버에 요청하지 않는다** — 시간대 판단은 LLM 에 넘기는
     # 대화 로그의 메시지별 `HH:MM` 으로 되고, 기억 중복 판정(30일)에는 마지막 메시지 시각과의
@@ -189,19 +238,27 @@ class AiResult(Camel):
 
 
 class EmotionAnalysis(Camel):
-    """감정 분석 (규격서 11장).
+    """감정 분석 = **실 상태 표현** (규격서 11장 · `docs/state-display-v4.md`).
 
-    ⏸️ 별도 기능으로 명세가 아직 나오지 않았다. 지금은 항상 빈 배열을 반환한다.
-    스키마만 규격서대로 잡아두고 채우지 않는다.
+    위젯 ①번 줄(상시)이 이 배열이고, ②번 줄(3종 개입)이 `results` 다.
+    **화면이 두 줄이라 배열도 두 개다.** 서로 밀어내지 않는다.
+
+    `subject` 는 감정의 주인, `viewer` 는 그걸 보는 사람이다. 두 값이 다르다 —
+    **각자 상대방의 상태를 본다** (문서 4장①). 그래서 A 화면과 B 화면의 내용이 다르다.
+
+    `state_text` 는 규격서에 없는 **선택 필드**다. 서버가 받아주면 실어 보내고, 아니면
+    직렬화에서 빠진다(14장). 프론트가 라벨 → 문구 매핑을 갖는 경우에도 워커 로직은 같다.
     """
 
     subject_participant: ParticipantKey
     viewer_participant: ParticipantKey
-    emotion_type: str
+    emotion_type: StateLabel
     intensity_value: float
     should_show: bool
     trigger_message_ids: list[int] = Field(default_factory=list)
     expires_at: datetime | None = None
+    # 규격서에 없는 선택 필드 (문서 9장 🔵3)
+    state_text: str | None = None
 
 
 class AnalysisResponse(Camel):
@@ -220,15 +277,18 @@ class AnalysisResponse(Camel):
 # --------------------------------------------------------------------------
 # 대화 분절 (`docs/segmentation-v3.md`)
 # --------------------------------------------------------------------------
+# 발화 하나가 직전까지의 맥락과 얼마나 이어지는가.
+#
+# ⚠️ **연속성 점수다. 변화량이 아니다.** 높을수록 **안 바뀐 것**이다 —
+# 90~80점대면 "이전 맥락과 비슷하다". 방향을 뒤집지 말 것 (문서 3-3).
+# 같은 설명이 `prompts/segment.md` 에 있다 — 모델은 그걸 읽는다.
+#
+# **LLM 은 여기까지만 한다. 자를지 말지는 `segment.py` 의 임계값이 정한다.**
+# 경계가 LLM 안에 있으면 과분절이 나와도 조정할 손잡이가 없다.
+#
+# docstring 을 짧게 두는 이유는 `EmotionScores` 위 주석 참조 — 매 요청 전송된다.
 class SegmentScore(BaseModel):
-    """발화 하나가 **직전까지의 맥락과 얼마나 이어지는가.**
-
-    ⚠️ **연속성 점수다. 변화량이 아니다.** 높을수록 **안 바뀐 것**이다 —
-    90~80점대면 "이전 맥락과 비슷하다". 방향을 뒤집지 말 것 (문서 3-3).
-
-    **LLM 은 여기까지만 한다. 자를지 말지는 `segment.py` 의 임계값이 정한다.**
-    경계가 LLM 안에 있으면 과분절이 나와도 조정할 손잡이가 없다.
-    """
+    """발화 하나의 맥락 연속성 점수. 높을수록 이어진다."""
 
     message_id: int
     same_context: bool
@@ -353,12 +413,11 @@ class DateGateResult(BaseModel):
     message_ids: list[int] = Field(default_factory=list)
 
 
+# 실제 장소는 카카오 로컬 API 로만 가져온다. LLM 이 상호명을 만들면 존재하지 않는
+# 가게가 나오고 externalUrl 이 죽은 링크가 된다.
+# (docstring 은 매 요청 전송되므로 짧게 — `EmotionScores` 위 주석 참조)
 class DatePlanLLMOutput(BaseModel):
-    """대화 + 기억을 읽고 **무엇을 찾을지** 정한다. 장소를 지어내지 않는다.
-
-    실제 장소는 카카오 로컬 API 로만 가져온다. LLM 이 상호명을 만들면 존재하지 않는
-    가게가 나오고 externalUrl 이 죽은 링크가 된다.
-    """
+    """대화 + 기억을 읽고 무엇을 찾을지 정한다. 장소를 지어내지 않는다."""
 
     should_recommend: bool
     scope: Literal["common", "individual"]
@@ -394,12 +453,10 @@ ConcernType = Literal[
 ]
 
 
+# 룰로 잡을 수 없다. 명세도 "LLM 을 통한 스트림 내 대화 맥락 이해가 제일 중요"라고
+# 못박아 뒀다. 그래서 이 기능은 게이트가 LLM 이다.
 class ConcernLLMOutput(BaseModel):
-    """관계 고민 신호 분류 + 검색어 생성.
-
-    룰로 잡을 수 없다. 명세도 "LLM 을 통한 스트림 내 대화 맥락 이해가 제일 중요"라고
-    못박아 뒀다. 그래서 이 기능은 게이트가 LLM 이다.
-    """
+    """관계 고민 신호 분류 + 검색어 생성."""
 
     should_recommend: bool
     concern: ConcernType
@@ -410,15 +467,52 @@ class ConcernLLMOutput(BaseModel):
     note: str           # 판정 근거 (내부용)
 
 
+# 제목·썸네일만으로 고르지 않는다. 댓글이 "영상이 실제로 무엇을 말하는지"를 알려준다.
+# 침묵이 기본값이라는 지시는 `prompts/yt_pick.md` 에도 있다.
 class VideoPickLLMOutput(BaseModel):
-    """후보 영상 + 베스트 댓글을 읽고 1개를 고른다.
-
-    제목·썸네일만으로 고르지 않는다. 댓글이 "영상이 실제로 무엇을 말하는지"를 알려준다.
-    적합한 후보가 없으면 `picked_index = -1` 로 침묵한다.
-    """
+    """후보 영상과 댓글을 읽고 1개를 고른다. 적합한 후보가 없으면 picked_index = -1."""
 
     picked_index: int  # 후보 목록에서 고른 인덱스. 없으면 -1
     recommendation_reason: str
+
+
+# --------------------------------------------------------------------------
+# 실 상태 표현 (상시 — 후보가 아니다)
+# --------------------------------------------------------------------------
+# 화자 한 명의 감정 축 점수.
+#
+# ⚠️ **docstring 을 길게 쓰지 말 것.** 클래스 docstring 은 JSON 스키마의 `description`
+# 으로 들어가 **매 요청 API 로 전송된다.** 여기 있던 설명 때문에 이 스키마만 640 토큰이었고
+# 그중 414 가 사람용 주석이었다. 모델에게 필요한 지시는 `prompts/state.md` 에 있다.
+#
+# **LLM 은 점수까지만 낸다. 라벨도 문구도 만들지 않는다.**
+# 라벨은 `state.pick_label()` 의 임계값이 정하고, 문구는 `copy.STATE_TEXT` 사전이 정한다.
+#
+# 처음에는 LLM 이 라벨을 직접 고르게 했다가 바꿨다. 서운함과 분노가 같이 높은 구간
+# (다투는 중)에서 모델이 둘 중 하나를 임의로 골랐고, 점수가 없으니 왜 그쪽인지 알 수도
+# 조정할 수도 없었다 — `case11_mixed` 에서 말투 교정은 공격 표현으로 잡은 발화를 상태
+# 산출은 서운함으로 읽었다. **분절이 경계를 LLM 밖으로 뺀 이유와 같다**
+# (`docs/state-display-v4.md` 6장). 명세의 산출 흐름과도 이쪽이 맞는다 —
+# "감정 수치 스코어링(예: Sadness 3점) → 상태 라벨 매핑".
+#
+# ⚠️ **평온(`STABLE`)에 해당하는 축은 없다.** 처음에는 `calm` 을 두었는데 모델이 그걸
+# 바닥값으로 깔아서(전 픽스처에서 3) 다른 축이 3 이하면 전부 `STABLE` 로 먹혔다.
+# 평온은 다른 감정이 없는 상태지 경쟁하는 감정이 아니다. 네 축이 전부 임계 아래면 그게
+# 평온이다 — `state.pick_label()` 이 그렇게 처리한다.
+class EmotionScores(BaseModel):
+    """화자 한 명의 감정 점수. 각 축 0~5."""
+
+    speaker: Speaker
+    affection: int   # 애정·설렘·화해. 쌓인 것이 풀리는 흐름     → RESOLVED
+    hurt: int        # 서운함·오해·답답함. 안으로 쌓이는 흐름     → ACCUMULATED
+    joy: int         # 들뜸·활기·웃음                          → ENGAGED
+    anger: int       # 분노·격앙. 밖으로 터뜨림                 → ESCALATED
+    confident: bool  # 근거가 뚜렷한가. false 면 파이썬 쪽에서 STABLE 로 내린다
+    note: str        # 판정 근거 (내부용, 사용자에게 보여주지 않는다)
+
+
+class StateLLMOutput(BaseModel):
+    states: list[EmotionScores]
 
 
 # --------------------------------------------------------------------------

@@ -23,7 +23,7 @@ from worker.models import (
     ToneResultData,
     YoutubeResultData,
 )
-from worker import segment
+from worker import segment, state
 from worker.llm import USAGE
 from worker.pipeline import Trace, analyze
 
@@ -60,6 +60,17 @@ def _show_trace(trace: Trace) -> None:
                     else "유지" if sc.topic_score >= segment.KEEP_SOFT else "회색")
             print(f"          {mark} #{sc.message_id} 화제 {sc.topic_score:>3} "
                   f"말투 {sc.tone_score:>3} 같은맥락={str(sc.same_context):<5} {zone}")
+
+    if trace.state_scored:
+        # 5축 점수와 거기서 룰이 고른 라벨. note 는 내부용이라 화면에 안 나간다.
+        print(f"  실상태채점 {DIM}(LLM 은 점수만 · 라벨은 임계값이 정한다"
+              f" · anger≥{state.ANGER_WINS} 우선 · 최고<{state.MIN_SCORE} 면 STABLE){OFF}")
+        for sc in trace.state_scored:
+            label, intensity = state.pick_label(sc)
+            axes = (f"애정{sc.affection} 서운{sc.hurt} 활기{sc.joy} 분노{sc.anger}")
+            mark = "" if sc.confident else f" {DIM}확신없음 → STABLE{OFF}"
+            print(f"           · {sc.speaker}  {axes}   → {BOLD}{label}{OFF} {intensity:.0f}{mark}")
+            print(f"             {DIM}{sc.note}{OFF}")
 
     if trace.extracted:
         print(f"  기억추출 {len(trace.extracted)}건 (신규 저장 {len(trace.saved)}건)")
@@ -142,6 +153,18 @@ def _show_result(result: AiResult) -> None:
             print(f"    요약   {DIM}{data.video_summary[:80]}…{OFF}")
 
 
+def _show_states(response: AnalysisResponse) -> None:
+    """위젯 ①번 줄 — 보는 사람마다 다르다.
+
+    A 화면과 B 화면의 내용이 다른 것이 이 기능의 핵심이라, 화면 기준으로 묶어서 보여준다.
+    """
+    print(f"\n  {BOLD}실 상태{OFF}  {DIM}(위젯 ①번 줄 · 상시){OFF}")
+    for s in response.emotion_analyses:
+        keep = "" if s.should_show else f"  {DIM}← 갱신 없음 (직전 문구 유지){OFF}"
+        print(f'    {s.viewer_participant} 화면   "{s.state_text}"   {DIM}'
+              f"{s.emotion_type} {s.intensity_value:.1f} · 대상 {s.subject_participant}{OFF}{keep}")
+
+
 def show(path: Path, response: AnalysisResponse, trace: Trace, verbose: bool) -> None:
     print(f"\n{BOLD}▸ {path.name}{OFF}   status={response.status}")
 
@@ -152,11 +175,14 @@ def show(path: Path, response: AnalysisResponse, trace: Trace, verbose: bool) ->
         print(f"  {response.error_code}: {response.error_message}")
         return
 
+    if response.emotion_analyses:
+        _show_states(response)
+
     for result in response.results:
         _show_result(result)
 
     if not response.results:
-        print(f"  {DIM}개입하지 않음{OFF}")
+        print(f"\n  {DIM}개입하지 않음 (②번 줄 비어 있음){OFF}")
 
     # 왜 안 나갔는지는 시연 중 질문이 가장 많이 나오는 지점이다. verbose 없이도 보여준다.
     for name, reason in trace.skipped:

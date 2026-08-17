@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 
 from langchain_core.vectorstores import InMemoryVectorStore
@@ -33,6 +34,11 @@ KST = timezone(timedelta(hours=9))
 
 _store: InMemoryVectorStore | None = None
 _indexed_ids: set[str] = set()
+
+# 인덱스를 만드는 스레드와 쓰는 스레드가 갈렸다 (`router.run()` 의 병렬 실행 + `warm_index()`).
+# 락이 없으면 두 스레드가 동시에 `_store is None` 을 보고 **임베딩을 두 번** 돌리고,
+# `_indexed_ids` 갱신이 엇갈려 일부 기억이 인덱스에서 빠진다.
+_store_lock = threading.Lock()
 
 
 def now_kst() -> datetime:
@@ -71,16 +77,18 @@ def _embed_text(m: Memory) -> str:
 
 def _get_store() -> InMemoryVectorStore:
     global _store
-    if _store is None:
-        embeddings = OpenAIEmbeddings(
-            model=os.getenv("KAKAPO_EMBEDDING_MODEL", "text-embedding-3-small")
-        )
-        _store = InMemoryVectorStore(embeddings)
-        _index(load_memories())
-    return _store
+    with _store_lock:
+        if _store is None:
+            embeddings = OpenAIEmbeddings(
+                model=os.getenv("KAKAPO_EMBEDDING_MODEL", "text-embedding-3-small")
+            )
+            _store = InMemoryVectorStore(embeddings)
+            _index_locked(load_memories())
+        return _store
 
 
-def _index(memories: list[Memory]) -> None:
+def _index_locked(memories: list[Memory]) -> None:
+    """**`_store_lock` 을 잡은 상태에서만 부른다.**"""
     fresh = [m for m in memories if m.id not in _indexed_ids]
     if not fresh or _store is None:
         return
@@ -91,11 +99,34 @@ def _index(memories: list[Memory]) -> None:
     _indexed_ids.update(m.id for m in fresh)
 
 
+def _index(memories: list[Memory]) -> None:
+    with _store_lock:
+        _index_locked(memories)
+
+
+def warm_index() -> None:
+    """인덱스를 미리 만들어 둔다. **결과를 바꾸지 않고 시점만 앞당긴다.**
+
+    27건을 임베딩하는 데 2.6초가 걸리는데, 지금은 그게 **데이트 코스 경로 한가운데**서
+    일어난다 (`retrieve_many` → `search` → `_get_store`). 첫 요청의 임계 경로에 그대로
+    얹히는 값이다.
+
+    분절 LLM 호출이 도는 동안은 어차피 기다리는 시간이라 거기 겹쳐 둔다.
+    실패해도 조용히 넘어간다 — 뒤에서 `_get_store()` 가 다시 시도하고, 그때 나는 오류가
+    진짜 오류다. 여기서 던지면 워밍업 실패가 요청 실패로 둔갑한다.
+    """
+    try:
+        _get_store()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def reset_index() -> None:
     """테스트용 — 인덱스를 비운다."""
     global _store
-    _store = None
-    _indexed_ids.clear()
+    with _store_lock:
+        _store = None
+        _indexed_ids.clear()
 
 
 # --------------------------------------------------------------------------

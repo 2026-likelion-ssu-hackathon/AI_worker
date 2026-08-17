@@ -3,6 +3,10 @@
 규격서 6장은 한 번의 분석 요청에서 **여러 기능이 동시에 발동할 수 있다**고 정의한다.
 그래서 라우터는 "하나를 고르는" 구조가 아니라 "발동한 것을 모으는" 구조다.
 
+> 위젯은 **두 줄**이다. 여기서 모으는 `results` 는 ②번 줄이고, 미발동이면 그냥 빈다.
+> ①번 줄(실 상태 표현)은 후보가 아니라 상시라서 `read_state()` 가 따로 처리하고
+> `emotionAnalyses` 로 나간다 (`docs/state-display-v4.md`).
+
 **후보들은 전체 스트림이 아니라 활성 세그먼트(`ctx.active`)만 본다.**
 개입은 지금 벌어지고 있는 대화에 대해서 하는 것이다 — 두 시간 전에 끝난 화제에 지금
 카드를 띄우는 건 늦은 게 아니라 틀린 것이다 (`docs/segmentation-v3.md` 5장).
@@ -27,21 +31,24 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
-from worker import date_course, places, youtube
+from worker import date_course, places, state, youtube
 from worker.copy import TONE_GUIDE
 from worker.date_course import MEMORY_K, MEMORY_KINDS, MIN_PLACES
 from worker.extract import extract_memories
-from worker.filter import banned_in, find_banned, is_clean
+from worker.filter import banned_in, banned_in_state, find_banned, is_clean
 from worker.models import (
     AiResult,
     AnalysisRequest,
     ConcernLLMOutput,
     DateGateResult,
     DatePlanLLMOutput,
+    EmotionAnalysis,
+    EmotionScores,
     Memory,
     Message,
     Segment,
@@ -50,6 +57,7 @@ from worker.models import (
     ToneJudgeLLMOutput,
     ToneResultData,
     to_key,
+    to_speaker,
 )
 from worker.places import KakaoPlace
 from worker.profile import resolve_profile
@@ -80,6 +88,9 @@ class Trace:
         # 기억
         self.extracted: list[Memory] = []
         self.saved: list[Memory] = []
+        # 실 상태 표현 (위젯 ①번 줄)
+        self.states: list[EmotionAnalysis] = []
+        self.state_scored: list[EmotionScores] = []  # 감정 5축 점수 + 근거 (내부용)
         # 갈등 중재
         self.tone_gate: ToneGateResult | None = None
         self.tone_judged: ToneJudgeLLMOutput | None = None
@@ -114,6 +125,18 @@ class Context:
         """활성 세그먼트의 메시지. 게이트·트리거·RAG·기억 추출이 보는 범위."""
         return self.segments[-1].messages if self.segments else self.messages
 
+    def recent_keys(self, result_type: str) -> set[str]:
+        """최근에 이미 내보낸 결과의 식별자 (규격서 10장 "동일 영상 재추천 방지").
+
+        서버가 `recentResults` 를 안 보내면 빈 집합이고, 그러면 지금까지처럼 중복 방지가
+        걸리지 않는다. **없는 것을 있는 척하지 않는다** — 워커는 상태를 갖지 않는다.
+        """
+        return {
+            r.reference_key
+            for r in self.request.recent_results
+            if r.result_type == result_type and r.reference_key
+        }
+
 
 class Candidate(Protocol):
     name: str
@@ -135,9 +158,10 @@ class ToneCandidate:
         if not gate.triggered or gate.speaker is None:
             return None
 
-        # 기준선은 전체 스트림으로 잡는다 — 표본이 넓을수록 "평소 대비"가 정확해진다.
+        # 기준선은 요청에 실려 온 값(`speakerProfiles`)이 있으면 그것을 쓴다. 없으면 시드,
+        # 그것도 없으면 전체 스트림에서 계산한다 — 표본이 넓을수록 "평소 대비"가 정확해진다.
         # 판정 프롬프트의 직전 대화는 맥락(ctx.context)을 쓴다.
-        profile = resolve_profile(gate.speaker, ctx.messages)
+        profile = resolve_profile(gate.speaker, ctx.messages, ctx.request.speaker_profiles)
         judged = tone_judge(ctx.context, gate, profile)
         ctx.trace.tone_judged = judged
         if not judged.should_suggest:
@@ -199,6 +223,16 @@ class DateCandidate:
 
         region = None if plan.region.strip().lower() in ("", "none") else plan.region.strip()
         course = date_course.build_course(plan.queries, region)
+
+        # 최근에 이미 추천한 장소는 뺀다. 같은 커플에게 매번 같은 코스를 주지 않는다.
+        # 서버가 `recentResults` 를 안 보내면 빈 집합이라 아무것도 안 걸러진다.
+        seen = ctx.recent_keys("DATE_RECOMMENDATION")
+        if seen:
+            dropped = [p.name for p in course if p.name in seen]
+            course = [p for p in course if p.name not in seen]
+            if dropped:
+                ctx.trace.skip(self.name, f"최근 추천한 장소 제외 — {', '.join(dropped)}")
+
         ctx.trace.date_places = course
         if len(course) < MIN_PLACES:
             ctx.trace.skip(self.name, f"카카오 검색 결과 부족 ({len(course)}곳)")
@@ -244,6 +278,17 @@ class YoutubeCandidate:
             v for v in videos
             if find_banned(v.title) is None and find_banned(v.summary()) is None
         ]
+
+        # 규격서 10장 — "동일 영상을 최근에 추천한 경우 다른 후보 탐색".
+        # **LLM 에 보이기 전에 뺀다.** 후보 목록에 남겨두고 "고르지 말라"고 하면
+        # 지시를 어길 여지가 생기고, 후보가 줄어든 만큼 검색을 더 하지도 않는다.
+        seen = ctx.recent_keys("YOUTUBE_RECOMMENDATION")
+        if seen:
+            before = len(videos)
+            videos = [v for v in videos if v.video_id not in seen]
+            if len(videos) < before:
+                ctx.trace.skip(self.name, f"최근 추천한 영상 제외 — {before - len(videos)}건")
+
         ctx.trace.yt_candidates = videos
         if not videos:
             ctx.trace.skip(self.name, "후보 영상 없음 — 침묵")
@@ -282,6 +327,34 @@ def split(ctx: Context) -> None:
     ctx.trace.scores = result.scores
 
 
+def read_state(ctx: Context) -> list[EmotionAnalysis]:
+    """위젯 ①번 줄 — 실 상태 표현. **게이트가 없다. 매 요청 돈다.**
+
+    후보 기능이 아니라서 `CANDIDATES` 에 넣지 않는다. `route()` 는 "발동한 것을 모으는"
+    함수인데 이건 발동 여부가 없다. 결과도 `results` 가 아니라 `emotionAnalyses` 로 나간다
+    (`docs/state-display-v4.md` 5장).
+
+    **`ctx.context` 를 본다.** 활성 세그먼트만 보면 "쌓임 → 풀어짐" 추이를 볼 수 없다 —
+    최소 두 시점이 필요하다. 말투 판정이 같은 이유로 쓰는 범위를 그대로 쓴다.
+    전체 스트림을 쓰지 않는 이유는 분절 설계 그대로다. 세 시간 전에 끝난 다툼의 감정을
+    지금 화면에 띄우면 늦은 게 아니라 **틀린 것**이다.
+    """
+    speakers = [to_speaker(p.participant_key) for p in ctx.request.participants]
+    result = state.read_state(ctx.context, speakers, ctx.now)
+    ctx.trace.state_scored = result.scored
+
+    # 지금은 사전이 상수라 걸릴 일이 없다. 문구를 LLM 이 만들게 바뀌면 여기가 방어선이 된다.
+    clean: list[EmotionAnalysis] = []
+    for analysis in result.analyses:
+        if (hit := banned_in_state(analysis)) is not None:
+            ctx.trace.skip("state", f"금지어 필터 — '{hit}'")
+            continue
+        clean.append(analysis)
+
+    ctx.trace.states = clean
+    return clean
+
+
 def harvest_memories(ctx: Context) -> None:
     """대화에서 기억을 뽑아 저장소에 넣는다.
 
@@ -298,6 +371,11 @@ def harvest_memories(ctx: Context) -> None:
 
 
 def route(ctx: Context) -> list[AiResult]:
+    """후보를 순서대로 돌린다. **`run()` 이 병렬로 도는 게 기본이고 이건 폴백이다.**
+
+    동작이 같아야 하므로 `run()` 과 규칙을 공유한다 — 우선순위 순서, 유튜브 보류 조건,
+    `trace.fired` 내용이 전부 동일하다. 병렬 실행을 끄고 원인을 좁힐 때 쓴다.
+    """
     results: list[AiResult] = []
     for candidate in CANDIDATES:
         if (
@@ -313,3 +391,70 @@ def route(ctx: Context) -> list[AiResult]:
             results.append(result)
             ctx.trace.fired.append(candidate.name)
     return results
+
+
+# --------------------------------------------------------------------------
+# 병렬 실행
+# --------------------------------------------------------------------------
+# 분절 이후 단계는 대부분 서로 독립인데 순차로 돌아서 시간이 그냥 더해지고 있었다.
+# 실측 14.0초짜리 요청에서 LLM 에만 12.0초를 썼다.
+#
+#     분절 ─┬─ 상태 산출              (독립)
+#           ├─ 말투 판정 → 말투 생성   (독립)
+#           └─ 기억 추출 → 데이트 계획 → 카카오 → 데이트 문구
+#                                     └─ 유튜브 (말투 결과를 알아야 보류 판단)
+#
+# **의존이 둘 있고 둘 다 지킨다.**
+#
+# ① 기억 추출 → 데이트. 방금 "마라탕 땡긴다"고 한 발화가 같은 요청의 추천에 반영되는 것이
+#    설계 가치라(`CLAUDE.md`) 순서를 깨지 않는다. 3초쯤 더 줄일 수 있지만 그건 기능 변경이다.
+# ② 말투 → 유튜브. `SUPPRESS_YOUTUBE_WHEN_TONE` 판단에 말투 결과가 필요하다.
+#    미리 돌려놓고 버리는 방법도 있지만 유튜브는 쿼터가 하루 95회라 버리는 호출을 만들지 않는다.
+#
+# LLM·HTTP 대기가 전부라 스레드로 충분하다 (GIL 이 문제되지 않는다).
+MAX_WORKERS = 4
+
+
+def _build(candidate: Candidate, ctx: Context) -> AiResult | None:
+    return candidate.build(ctx)
+
+
+def run(ctx: Context) -> tuple[list[EmotionAnalysis], list[AiResult]]:
+    """분절 이후 전체를 돌린다. 독립인 것은 동시에.
+
+    **결과 순서는 `CANDIDATES` 우선순위 그대로다.** 완료 순서로 담으면 요청마다 배열
+    순서가 바뀌고, 프론트가 `results[0]` 을 쓰기로 하면 화면이 달라진다.
+    """
+    tone, date, youtube = CANDIDATES
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        f_state = pool.submit(read_state, ctx)
+        f_tone = pool.submit(_build, tone, ctx)
+        f_memory = pool.submit(harvest_memories, ctx)
+
+        # 데이트는 방금 저장된 기억을 봐야 한다 (의존 ①)
+        f_memory.result()
+        f_date = pool.submit(_build, date, ctx)
+
+        # 유튜브는 말투 결과를 알아야 한다 (의존 ②)
+        tone_result = f_tone.result()
+        if SUPPRESS_YOUTUBE_WHEN_TONE and tone_result is not None:
+            ctx.trace.skip(youtube.name, "말투 교정이 발동한 요청 — 냉각기가 아니므로 보류")
+            f_youtube = None
+        else:
+            f_youtube = pool.submit(_build, youtube, ctx)
+
+        by_name = {
+            tone.name: tone_result,
+            date.name: f_date.result(),
+            youtube.name: f_youtube.result() if f_youtube is not None else None,
+        }
+        states = f_state.result()
+
+    results: list[AiResult] = []
+    for candidate in CANDIDATES:
+        result = by_name[candidate.name]
+        if result is not None:
+            results.append(result)
+            ctx.trace.fired.append(candidate.name)
+    return states, results

@@ -3,9 +3,15 @@
 말투 교정은 **절대 기준으로 판정하면 안 된다.** 평소 "ㅇㅇ"을 자주 쓰는 커플에게 "ㅇㅇ"은
 무례가 아니다. 특정 단어가 아니라 **그 사람의 평소 대비 변화량**을 본다.
 
-기준선은 두 곳에서 온다.
-1. `data/speaker_profiles.json` — 3개월치 대화에서 뽑은 시드 (기억 시드와 같은 논리)
-2. 시드가 없으면 들어온 대화에서 직접 계산
+기준선은 세 곳에서 온다. **앞에 있는 것이 이긴다.**
+
+1. 요청의 `speakerProfiles` — 서버가 저장·집계해서 실어주는 값 (2026-08-17 합의)
+2. `data/speaker_profiles.json` — 3개월치 대화에서 뽑은 시드 (기억 시드와 같은 논리)
+3. 둘 다 없으면 들어온 대화에서 직접 계산
+
+**3번은 폴백이지 정답이 아니다.** 요청에는 최근 20~30개만 오는데 그걸로 "평소"를 계산하면
+방금 화나서 보낸 메시지가 기준선에 섞여서 변화량이 안 잡힌다 — 말투 교정이 무력화된다.
+그래서 1번을 서버에 요청했고, 없는 동안은 2번 시드가 그 자리를 대신한다.
 
 시드가 필요한 이유는 기억 시드와 같다. 픽스처 한 개짜리 대화만으로는
 "평소 ㅋ 3개 → 이번엔 0개" 같은 대비를 만들 수 없다.
@@ -18,7 +24,13 @@ import re
 from collections import Counter
 
 from worker import DATA_DIR
-from worker.models import Message, Speaker, SpeakerProfile
+from worker.models import (
+    Message,
+    Speaker,
+    SpeakerProfile,
+    SpeakerProfileInput,
+    to_speaker,
+)
 from worker.text import norm_len as _norm_len
 
 PROFILE_FILE = DATA_DIR / "speaker_profiles.json"
@@ -88,8 +100,28 @@ def load_seed_profiles() -> dict[str, SpeakerProfile]:
     return {item["speaker"]: SpeakerProfile(**item) for item in raw}
 
 
-def resolve_profile(speaker: Speaker, messages: list[Message]) -> SpeakerProfile:
-    """시드가 있으면 시드를, 없으면 대화에서 계산한 값을 쓴다."""
+def from_request(given: SpeakerProfileInput) -> SpeakerProfile:
+    """요청으로 들어온 기준선을 내부 스키마로. 경계에서만 `USER_A` → `A` 로 바꾼다."""
+    return SpeakerProfile(
+        speaker=to_speaker(given.participant_key),
+        avg_length=given.avg_length,
+        period_rate=given.period_rate,
+        laugh_per_msg=given.laugh_per_msg,
+        emoji_rate=given.emoji_rate,
+        top_address=list(given.top_address),
+    )
+
+
+def resolve_profile(
+    speaker: Speaker,
+    messages: list[Message],
+    given: list[SpeakerProfileInput] | None = None,
+) -> SpeakerProfile:
+    """요청 값 > 시드 > 대화에서 계산. 앞에 있는 것이 이긴다 (모듈 설명 참조)."""
+    for item in given or []:
+        if to_speaker(item.participant_key) == speaker:
+            return from_request(item)
+
     seed = load_seed_profiles().get(speaker)
     return seed if seed is not None else compute_profile(messages, speaker)
 

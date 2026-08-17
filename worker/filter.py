@@ -3,7 +3,8 @@
 프롬프트에도 "관계 상태 언급 금지"를 넣지만, 그것만 믿지 않는다.
 LLM 판단에 맡기지 않고 **문자열 검사로 강제**한다. 이 프로젝트의 절대 제약이기 때문이다.
 
-검사 대상은 **사용자 화면에 실제로 나가는 문자열 전부**다. 우리가 생성한 문구뿐 아니라
+검사 대상은 **사용자 화면에 실제로 나가는 문자열 전부**다. 위젯 ②번 줄(`AiResult`)과
+①번 줄(`EmotionAnalysis`)을 둘 다 본다. 우리가 생성한 문구뿐 아니라
 유튜브 영상 제목·설명처럼 **외부에서 가져온 문자열도 포함한다.** "권태기 극복법"이라는
 영상 제목이 위젯에 뜨면, 그 문장을 우리가 쓴 게 아니어도 사용자는 화면에서 '권태기'를
 읽는다. 절대 제약의 근거는 "그 말을 들으면 의식이 심해진다"이지 "우리가 쓰면 안 된다"가
@@ -17,6 +18,7 @@ import re
 from worker.models import (
     AiResult,
     DateCourseResultData,
+    EmotionAnalysis,
     ToneResultData,
     YoutubeResultData,
 )
@@ -106,3 +108,21 @@ def banned_in(result: AiResult) -> str | None:
 
 def is_clean(result: AiResult) -> bool:
     return banned_in(result) is None
+
+
+# --------------------------------------------------------------------------
+# 실 상태 표현 — 위젯 ①번 줄
+# --------------------------------------------------------------------------
+# `visible_texts()` 는 `AiResult` 만 본다. 상태 문구는 `emotionAnalyses` 에 실려 나가므로
+# **그 경로로는 검사되지 않는다.** 세그먼테이션에서 화제 라벨을 만들지 않기로 한 것과
+# 같은 함정이다 (`docs/state-display-v4.md` 3-4).
+#
+# 지금 문구는 `copy.STATE_TEXT` 의 상수 5개고 임포트 시점에 이미 검사된다. 여기 걸릴
+# 일이 없다는 뜻인데, 그래도 둔다 — 나중에 문구를 LLM 이 만들게 바꾸는 순간 이 함수가
+# 유일한 방어선이 된다.
+def banned_in_state(state: EmotionAnalysis) -> str | None:
+    return find_banned(state.state_text)
+
+
+def is_clean_state(state: EmotionAnalysis) -> bool:
+    return banned_in_state(state) is None

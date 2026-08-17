@@ -192,6 +192,40 @@
   .pill.skipped { background: var(--bg); color: var(--dim); }
   .pill.failed { background: #fdeaea; color: #cf3b3b; }
 
+  /* 위젯 = ①번 줄 + ②번 줄. 두 줄이 한 덩어리라는 게 보이게 묶는다 */
+  .widget-stack {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--bg); padding: 8px; margin-bottom: 14px;
+  }
+  .widget-stack .stack-label {
+    font-size: 11px; color: var(--faint); padding: 2px 4px 8px; letter-spacing: .2px;
+  }
+  .widget-stack .widget { margin-bottom: 0; }
+  /* ②번 줄이 비는 것은 정상 상태다. 자리를 남겨서 두 줄 구조가 보이게 한다 */
+  .line2-empty {
+    border: 1px dashed var(--line); border-radius: var(--radius);
+    padding: 14px; text-align: center; font-size: 12px; color: var(--faint);
+  }
+
+  /* 위젯 ①번 줄 — 실 상태 표현. 상시라서 절대 비지 않는다 */
+  .stateline {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 12px 14px; margin-bottom: 10px;
+  }
+  .stateline .thread { width: 34px; height: 10px; border-radius: 6px; flex: none; }
+  .stateline .text { font-size: 15px; font-weight: 600; }
+  .stateline .meta { font-size: 11px; color: var(--faint); margin-left: auto; text-align: right; }
+  .stateline.stale { opacity: .55; }
+  .stateline.missing { border-style: dashed; }
+  .stateline.missing .text { color: var(--faint); font-weight: 500; }
+  /* 글로우는 디자인 확정값(무채색/핑크/파랑/초록/빨강). 실 모양은 시안 나오면 반영 */
+  .thread.STABLE      { background: #c9ccd4; }
+  .thread.RESOLVED    { background: #ef6fb0; }
+  .thread.ACCUMULATED { background: #5a86e0; }
+  .thread.ENGAGED     { background: #45b97c; }
+  .thread.ESCALATED   { background: #e05c5c; }
+
   .widget {
     background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
     overflow: hidden; margin-bottom: 14px;
@@ -658,10 +692,11 @@ function metricsHtml(run) {
   }).join("");
 
   return `<div class="card">
-    <h3>계측 <span class="q">단계별 시간 · 토큰</span></h3>
+    <h3>계측 <span class="q">단계별 시간 · 토큰 ·
+      <b>단계는 병렬로 돈다 — 막대의 합이 총 소요보다 크다</b></span></h3>
     <div class="tiles">
       <div class="tile"><div class="k">총 소요</div><div class="v">${ms(run.elapsedMs)}</div></div>
-      <div class="tile"><div class="k">LLM</div>
+      <div class="tile"><div class="k">LLM <span class="q">합계</span></div>
         <div class="v">${u.calls}<small>회</small> <small>${ms(u.llmMs || 0)}</small></div></div>
       <div class="tile"><div class="k">입력 토큰</div>
         <div class="v">${(u.input || 0).toLocaleString()}</div></div>
@@ -673,7 +708,7 @@ function metricsHtml(run) {
         <thead><tr><th>단계</th><th></th><th class="num">시간</th>
           <th class="num">입력</th><th class="num">출력</th></tr></thead>
         <tbody>${rows}
-          <tr><td>외부 API · 룰</td><td class="barcell">
+          <tr><td>외부 API · 룰 <span class="q">(LLM 대기와 겹침)</span></td><td class="barcell">
             <div class="bar" style="width:${((u.otherMs || 0) / peak) * 100}%;opacity:.3"></div></td>
             <td class="num">${ms(u.otherMs || 0)}</td><td class="num">—</td><td class="num">—</td></tr>
         </tbody>
@@ -719,6 +754,33 @@ const CAND_LABEL = { tone: "갈등 중재 (말투 교정)", date: "데이트 코
 
 function visibleTo(r, viewer) {
   return r.visibilityType === "COUPLE" || r.targetParticipant === "USER_" + viewer;
+}
+
+// 위젯 ①번 줄 — 실 상태 표현.
+// 보는 사람마다 **내용이 다르다.** 각자 상대방의 상태를 본다 (subject ≠ viewer).
+// ②번 줄과 자리를 다투지 않는다 — 3종이 전부 미발동이어도 이 줄은 남는다.
+function stateLineHtml(res, viewer) {
+  const mine = (res.emotionAnalyses || [])
+    .find((s) => s.viewerParticipant === "USER_" + viewer);
+
+  // ①번 줄이 비는 것은 **정상 상태가 아니다.** ②번 줄의 빈칸과 달리 원인을 봐야 한다.
+  // (상태 산출 LLM 실패 · 참여자 1명 · FAILED 응답)
+  if (!mine) {
+    return `<div class="stateline missing">
+      <span class="thread STABLE"></span>
+      <span class="text">①번 줄 없음</span>
+      <span class="meta">상태 산출 실패 또는 미수행 — 프론트는 직전 문구를 유지합니다</span>
+    </div>`;
+  }
+
+  const stale = mine.shouldShow ? "" : " stale";
+  const note = mine.shouldShow ? "" : " · 갱신 없음(직전 문구 유지)";
+  return `<div class="stateline${stale}">
+    <span class="thread ${esc(mine.emotionType)}"></span>
+    <span class="text">${esc(mine.stateText || "")}</span>
+    <span class="meta">${esc(mine.emotionType)} ${Number(mine.intensityValue).toFixed(1)}
+      · 대상 ${esc(mine.subjectParticipant)}${note}</span>
+  </div>`;
 }
 
 function widgetHtml(r) {
@@ -795,6 +857,19 @@ function traceHtml(t) {
       }).join("")}</ul></div>`);
   }
 
+  if (t.stateScored?.length) {
+    // 왜 그 라벨인지. LLM 은 점수만 내고 라벨은 임계값이 정한다 — 그 과정이 보이게 한다.
+    // note 는 내부용이라 화면 문구가 아니다.
+    const th = t.stateThresholds || {};
+    sec.push(`<div class="tsec"><h4>실 상태 채점
+      <span class="q">LLM 은 감정 점수만 · 라벨은 임계값이 정한다
+      · 분노≥${th.angerWins} 우선 · 최고&lt;${th.minScore} 면 STABLE</span></h4>
+      <ul>${t.stateScored.map((s) => `<li>${esc(s.speaker)}
+        <span class="q">애정 ${s.affection} · 서운 ${s.hurt} · 활기 ${s.joy} · 분노 ${s.anger}</span>
+        → <b>${esc(s.label)}</b> ${Number(s.intensity).toFixed(0)}
+        <div class="q">${s.confident ? "" : "확신 없음 → STABLE 로 내림 · "}${esc(s.note)}</div></li>`).join("")}</ul></div>`);
+  }
+
   if (t.extracted?.length) {
     sec.push(`<div class="tsec"><h4>기억 추출 ${t.extracted.length}건 (신규 저장 ${t.savedIds.length}건)</h4>
       <ul>${t.extracted.map((m) => `<li>[${esc(m.kind)}] ${esc(m.content)}
@@ -864,25 +939,32 @@ function renderOut() {
 
   let html = `<div class="status">
     <span class="pill ${res.status.toLowerCase()}">${res.status}</span>
-    <span>결과 ${results.length}건 · ${state.viewer} 화면에 ${mine.length}건 노출</span>
+    <span>①번 줄 상시 · ②번 줄 ${state.viewer} 화면에 ${mine.length}건
+      ${results.length > mine.length ? `<span class="q">(전체 ${results.length}건)</span>` : ""}</span>
   </div>`;
 
   if (res.status === "FAILED") {
     html += `<div class="err">${esc(res.errorCode)}\n${esc(res.errorMessage || "")}</div>`;
   }
 
-  html += metricsHtml(state.run);
-  html += segmentsHtml(state.run.trace || {});
-  html += mine.map(widgetHtml).join("");
+  // ── 실제 화면 순서 그대로. 디버그 카드(계측·분절·판정 과정)는 그 아래로 내린다.
+  //    위젯 미리보기 패널인데 계측 카드가 위에 있으면 ①번 줄이 묻힌다.
+  const line2 = mine.map(widgetHtml).join("") || (res.status === "FAILED" ? "" :
+    `<div class="line2-empty">②번 줄 없음 — 개입하지 않는 것도 정상 동작입니다</div>`);
 
-  if (!mine.length && res.status !== "FAILED") {
-    html += `<div class="empty">이 화면에는 아무것도 뜨지 않습니다.<br>
-      <span style="font-size:12px">개입하지 않는 것도 정상 동작입니다.</span></div>`;
-  }
+  html += `<div class="widget-stack">
+    <div class="stack-label">kakapo 위젯 · ${state.viewer} 화면</div>
+    ${stateLineHtml(res, state.viewer)}
+    ${line2}
+  </div>`;
+
   if (others > 0) {
     html += `<div class="hidden-note">상대(${state.viewer === "A" ? "B" : "A"}) 화면에만 뜨는 결과 ${others}건이 있습니다.
       ${state.viewer} 는 그런 게 떴다는 사실 자체를 모릅니다.</div>`;
   }
+
+  html += metricsHtml(state.run);
+  html += segmentsHtml(state.run.trace || {});
 
   const skipped = state.run.trace?.skipped || [];
   if (skipped.length) {

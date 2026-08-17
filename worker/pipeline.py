@@ -2,7 +2,13 @@
 
 규격서(`docs/contract-v1.md`)의 **공통 분석 요청**을 받아 **공통 분석 응답**을 만든다.
 
-    AnalysisRequest → [대화 분절] → [기억 수확] → [후보 기능 라우팅] → AnalysisResponse
+    AnalysisRequest → [대화 분절] → [기억 수확 · 실 상태 · 후보 3종] → AnalysisResponse
+
+분절만 반드시 먼저 돌고, 그 뒤는 `router.run()` 이 **독립인 것을 동시에** 돌린다.
+의존 두 개(기억 추출 → 데이트, 말투 → 유튜브)는 그대로 지킨다.
+
+위젯은 두 줄이고 응답의 배열도 두 개다. ①번 줄(상시) = `emotionAnalyses`,
+②번 줄(3종 개입, 미발동이면 빈 줄) = `results`. 서로 밀어내지 않는다.
 
 분절이 맨 앞에 서는 이유는 `docs/segmentation-v3.md` 에 있다. 요약하면 — 서버는 최근 N개를
 통째로 보내고 화제 경계를 모른다. 그대로 두면 두 시간 전에 끝난 데이트 얘기가 지금 막
@@ -13,15 +19,19 @@
 > 지금은 **DTO 와 판정 로직만** 규격에 맞춰두고 CLI 로 검증한다.
 > 서버 담당자와 규격이 확정되면 `analyze()` 를 FastAPI 핸들러에 그대로 물리면 된다.
 
-`emotionAnalyses` 는 항상 빈 배열이다. 별도 기능으로 명세가 아직 나오지 않았다.
+`emotionAnalyses` 는 **실 상태 표현**이 채운다 (`docs/state-display-v4.md`).
+규격 변경 없이 규격서 11장이 비워 둔 자리를 그대로 쓴다.
 """
 
 from __future__ import annotations
 
+import threading
+
 from pydantic import ValidationError
 
 from worker.models import AnalysisRequest, AnalysisResponse
-from worker.router import Context, Trace, harvest_memories, route, split
+from worker.retrieve import warm_index
+from worker.router import Context, Trace, run, split
 
 __all__ = ["Context", "Trace", "analyze"]
 
@@ -62,14 +72,23 @@ def analyze(payload: dict, persist: bool = True) -> tuple[AnalysisResponse, Trac
         trace=trace,
     )
 
+    # 기억 인덱스를 미리 만든다. 분절 LLM 호출이 도는 동안은 어차피 기다리는 시간이라
+    # 거기 겹친다 — 안 그러면 첫 요청의 데이트 코스 경로 한가운데서 2.6초를 쓴다.
+    # 데몬 스레드라 결과를 기다리지 않고, 뒤에서 `_get_store()` 가 같은 락을 잡는다.
+    threading.Thread(target=warm_index, daemon=True).start()
+
     try:
         split(ctx)
-        harvest_memories(ctx)
-        results = route(ctx)
+        states, results = run(ctx)
     except Exception as exc:  # noqa: BLE001
         return _failed(request.analysis_request_id, "MODEL_ERROR", str(exc)), trace
 
-    if not results:
+    # 규격서 12장 — `COMPLETED` 는 "기능 결과 **또는 감정 분석 결과**가 존재".
+    # 실 상태 표현이 상시라서 `states` 가 거의 항상 차고, 따라서 **`SKIPPED` 는 거의
+    # 나오지 않는다.** 상태 산출까지 실패했을 때만 남는다.
+    # 서버가 `SKIPPED` 를 "아무것도 안 함"으로 보고 전송을 건너뛰면 ①번 줄이 영영 안 뜬다 —
+    # `docs/contract-review.md` 에 고지해 둔 항목이다.
+    if not results and not states:
         return _skipped(request.analysis_request_id), trace
 
     return (
@@ -77,7 +96,7 @@ def analyze(payload: dict, persist: bool = True) -> tuple[AnalysisResponse, Trac
             analysis_request_id=request.analysis_request_id,
             status="COMPLETED",
             results=results,
-            emotion_analyses=[],
+            emotion_analyses=states,
         ),
         trace,
     )

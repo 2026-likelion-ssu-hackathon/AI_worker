@@ -21,3 +21,56 @@ DATE_GUIDE = "카카포가 추천하는 장소와 데이트 코스를 가져왔�
 
 # 유튜브 영상 추천 — 화면 명세 "[현재 겪고 있는 비슷한 상황을 다룬 영상이에요]"
 YOUTUBE_GUIDE = "현재 겪고 있는 상황과 비슷한 내용을 다룬 영상이에요."
+
+
+# --------------------------------------------------------------------------
+# 실 상태 표현 — 위젯 ①번 줄 (`docs/state-display-v4.md` 6장)
+# --------------------------------------------------------------------------
+# **LLM 이 만드는 문구가 아니다.** 라벨을 받아 여기서 고른다.
+# 상시 노출이라 자유 생성은 절대 제약 위반 확률을 매 요청 곱한다 (문서 3-3).
+#
+# 디자인 확정 (2026-08-17) — 라벨마다 실 모양·글로우가 정해져 있다.
+#
+#     STABLE       아래로 축 늘어진 곡선   무채색
+#     RESOLVED     중앙에 하트 매듭        핑크·마젠타
+#     ACCUMULATED  중앙이 엉킨 매듭        파랑
+#     ENGAGED      크고 규칙적인 파동      초록
+#     ESCALATED    날카롭고 좁은 스파이크   빨강
+#
+# `ESCALATED` 만 확정안("많이 화났어요")에서 바꿨다. 5개 중 유일한 **단정형**이라
+# 명세의 "단정·판단형 표현 금지"와 부딪혔고, 이 라벨이 뜨는 순간은 대개 말투 교정이
+# 같이 발동하는 순간이라 단정이 갈등을 키운다 (문서 6장).
+STATE_TEXT: dict[str, str] = {
+    "STABLE": "평온해요",
+    "RESOLVED": "다정해 보여요",
+    "ACCUMULATED": "서운해 보여요",
+    "ENGAGED": "신나 보여요",
+    "ESCALATED": "감정이 올라와요",
+}
+
+# 명세의 화면 규격 — 최대 10자(공백 포함), 어미 "~여요 / ~요 / ~해요"
+STATE_TEXT_MAX = 10
+STATE_TEXT_ENDINGS = ("여요", "해요", "요")
+
+
+def _validate_state_text() -> None:
+    """사전을 **임포트 시점에** 검사한다.
+
+    문구가 상수라는 것은 미리 전부 검사할 수 있다는 뜻이다. PM·디자인이 문구를 바꿔도
+    규격 위반이면 그 자리에서 터진다 — 화면에 나간 뒤에 발견하지 않는다.
+
+    `filter` 를 여기서 import 하는 이유: 절대 제약 검사를 사전에도 똑같이 건다.
+    금지어 목록의 주인은 `filter.py` 하나다 (복사해 두지 않는다).
+    """
+    from worker.filter import find_banned  # 순환 없음 — filter 는 copy 를 모른다
+
+    for label, text in STATE_TEXT.items():
+        if len(text) > STATE_TEXT_MAX:
+            raise ValueError(f"상태 문구가 {STATE_TEXT_MAX}자를 넘는다: {label} — '{text}' ({len(text)}자)")
+        if not text.endswith(STATE_TEXT_ENDINGS):
+            raise ValueError(f"상태 문구의 어미가 규격 밖이다: {label} — '{text}'")
+        if (hit := find_banned(text)) is not None:
+            raise ValueError(f"상태 문구에 금지어가 있다: {label} — '{text}' ('{hit}')")
+
+
+_validate_state_text()
