@@ -350,10 +350,10 @@ LLM 이 시간대를 판단할 수 있다 — 데이트 코스가 "밤 10시에 
 | 함수 | 하는 일 |
 | --- | --- |
 | `check_date_gate()` | 활성 세그먼트에서 데이트 의도 4종 정규식 |
-| `plan_date()` | LLM — 지역 + 검색어 2~4개 + 코스 의도. **장소를 지어내지 않는다** |
-| `build_course()` | 카카오에서 장소를 확정. 중복 제외. **`MIN_PLACES = 2` 곳을 못 채우면 미발동** |
+| `plan_date()` | LLM — 지역 + 검색어 **5개**(3곳 + 예비 2) + 코스 의도. **장소를 지어내지 않는다** |
+| `build_course()` | 카카오에서 장소를 확정. 중복 제외. **항상 `COURSE_PLACES = 3` 곳. 못 채우면 미발동** |
 | `write_reason()` | LLM — 확정된 상호를 보고 코스명·요약·추천 이유·장소 설명 |
-| `to_result()` | `mainPlace`(order 없음) + `coursePlaces`(order 1..n) 조립 |
+| `to_result()` | `mainPlace`(order 없음) + `coursePlaces`(order 1..3) 조립 |
 | `places.search_places()` | 카카오 로컬 키워드 검색 |
 | `_search_all()` | 검색어들을 동시에 던진다 (0.75초 → 0.20초) |
 | `places.region_center()` | 지역명 → 좌표 (`lru_cache`) |
@@ -453,7 +453,7 @@ LLM 호출을 둘로 나눈 이유: 최대 리스크는 **장난을 갈등으로
 check_date_gate()  룰 — 데이트 의도 4종
 retrieve_many()    RAG — 맥락과 유사한 기억 여러 건
 plan_date()        LLM — 지역 + 검색어 + 코스 의도 (장소를 지어내지 않는다)
-build_course()     카카오 로컬 — 실재하는 장소로 코스를 채운다 (2곳 미만이면 미발동)
+build_course()     카카오 로컬 — 실재하는 장소로 코스를 채운다 (3곳 못 채우면 미발동)
 write_reason()     LLM — 확정된 상호를 보고 코스명·요약·추천 이유
 ```
 

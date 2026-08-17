@@ -39,9 +39,18 @@ from worker.models import (
 from worker.places import KakaoPlace, region_center, search_places
 from worker.text import format_transcript
 
-# 코스에 넣을 장소 수
-MIN_PLACES = 2
-MAX_PLACES = 4
+# 코스에 넣을 장소 수 — **고정이다.** 2곳만 나오는 요청과 3곳 나오는 요청이 섞이면
+# 화면이 요청마다 달라 보인다 (2026-08-17 결정).
+COURSE_PLACES = 3
+
+# LLM 에게 받는 검색어 수. 3개가 아니라 **5개를 받는다.**
+#
+# 카카오 검색은 검색어에 따라 0건이 나온다 (`분위기 좋은 카페` 같은 수식어, 지역에 그
+# 업종이 없는 경우). 3개만 받으면 하나만 비어도 코스가 2곳이 된다.
+#
+# **파이썬이 대체 검색어를 지어내지 않는다.** 그러면 "무엇을 찾을지는 LLM" 이라는 역할
+# 구분이 깨진다. 예비까지 LLM 에게 받고, 파이썬은 순서대로 시도해 3개를 채우기만 한다.
+MAX_QUERIES = 5
 
 # 기억을 몇 건까지 근거로 넘길지
 MEMORY_K = 6
@@ -226,13 +235,23 @@ def build_course(queries: list[str], region: str | None) -> list[KakaoPlace]:
     `search_places` 의 반경 방어는 지역명이 있을 때만 걸리므로, 없을 때는 여기서 건다.
 
     지역명이 있으면 기존대로 지역 중심 반경을 쓴다 — 그쪽은 이미 의도대로 동작한다.
+
+    **`COURSE_PLACES` 개가 차면 멈춘다.** 검색어를 예비까지 받아오므로 앞쪽이 0건이어도
+    뒤에서 채워진다. 순서는 검색어 순서를 지키니 밥 → 구경 → 카페 흐름이 깨지지 않는다.
     """
-    queries = list(queries[:MAX_PLACES])
+    queries = list(queries[:MAX_QUERIES])
     if not queries:
         return []
 
     course: list[KakaoPlace] = []
     taken: set[str] = set()
+
+    def _take(found: list[KakaoPlace], query: str) -> bool:
+        """골라 담는다. 코스가 다 찼으면 True."""
+        if (picked := _choose(found, query, taken)) is not None:
+            course.append(picked)
+            taken.add(picked.name)
+        return len(course) >= COURSE_PLACES
 
     # 지역명이 있으면 검색끼리 의존이 없다 — 전부 동시에 던진다.
     # 좌표 조회를 미리 한 번 돌려 `lru_cache` 를 데운다. 안 그러면 병렬 호출이 같은 지역
@@ -240,40 +259,47 @@ def build_course(queries: list[str], region: str | None) -> list[KakaoPlace]:
     if region is not None:
         region_center(region)
         for query, found in zip(queries, _search_all(queries, region, None)):
-            if (picked := _choose(found, query, taken)) is not None:
-                course.append(picked)
-                taken.add(picked.name)
+            if _take(found, query):
+                break
         return course
 
     # 지역명이 없으면 **첫 장소가 코스의 중심**이라 그것만 먼저 확정해야 한다.
-    head = _choose(search_places(queries[0], region=None), queries[0], taken)
+    # 첫 검색어가 0건이면 다음 검색어로 중심을 잡는다 — 여기서 못 잡으면 뒤 검색이
+    # 전국에서 흩어진다.
     anchor: tuple[str, str] | None = None
-    if head is not None:
+    rest = queries
+    for i, query in enumerate(queries):
+        head = _choose(search_places(query, region=None), query, taken)
+        if head is None:
+            continue
         course.append(head)
         taken.add(head.name)
         if head.x and head.y:
             anchor = (head.x, head.y)
+        rest = queries[i + 1:]
+        break
+    else:
+        return course
 
-    rest = queries[1:]
-    if not rest:
+    if not rest or len(course) >= COURSE_PLACES:
         return course
 
     if anchor is None:
-        # 첫 검색이 비어서 중심을 못 잡았다. 원래대로 순차로 돌면서 잡는다 (드문 경우).
+        # 중심 좌표를 못 잡았다. 원래대로 순차로 돌면서 잡는다 (드문 경우).
         for query in rest:
             found = search_places(query, region=None, center=anchor)
-            if (picked := _choose(found, query, taken)) is None:
-                continue
-            course.append(picked)
-            taken.add(picked.name)
-            if anchor is None and picked.x and picked.y:
-                anchor = (picked.x, picked.y)
+            if (picked := _choose(found, query, taken)) is not None:
+                course.append(picked)
+                taken.add(picked.name)
+                if anchor is None and picked.x and picked.y:
+                    anchor = (picked.x, picked.y)
+                if len(course) >= COURSE_PLACES:
+                    break
         return course
 
     for query, found in zip(rest, _search_all(rest, None, anchor)):
-        if (picked := _choose(found, query, taken)) is not None:
-            course.append(picked)
-            taken.add(picked.name)
+        if _take(found, query):
+            break
     return course
 
 

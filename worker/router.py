@@ -38,7 +38,7 @@ from typing import Protocol
 
 from worker import date_course, places, state, youtube
 from worker.copy import TONE_GUIDE
-from worker.date_course import MEMORY_K, MEMORY_KINDS, MIN_PLACES
+from worker.date_course import COURSE_PLACES, MEMORY_K, MEMORY_KINDS
 from worker.extract import extract_memories
 from worker.filter import banned_in, banned_in_state, find_banned, is_clean
 from worker.limits import enforce, over_limit
@@ -260,8 +260,13 @@ class DateCandidate:
                 ctx.trace.skip(self.name, f"최근 추천한 장소 제외 — {', '.join(dropped)}")
 
         ctx.trace.date_places = course
-        if len(course) < MIN_PLACES:
-            ctx.trace.skip(self.name, f"카카오 검색 결과 부족 ({len(course)}곳)")
+        # 코스는 **항상 3곳**이다. 요청마다 2곳/3곳이 섞이면 화면이 달라 보인다.
+        # 검색어를 예비까지 받아도 못 채우면(지역에 그 업종이 없는 경우) 미발동한다 —
+        # 억지로 먼 곳을 끼워 넣으면 코스가 아니게 된다.
+        if len(course) < COURSE_PLACES:
+            ctx.trace.skip(
+                self.name, f"카카오 검색 결과 부족 ({len(course)}곳 / {COURSE_PLACES}곳 필요)"
+            )
             return None
 
         def _make() -> AiResult:
