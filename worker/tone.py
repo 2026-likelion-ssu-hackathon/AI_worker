@@ -50,8 +50,13 @@ LOW_PERIOD_RATE = 0.15
 LAUGH_BASELINE = 1.5
 EMOJI_BASELINE = 0.3
 
-# 다른 신호 없이 "평소 대비 급변"만으로 발동하려면 필요한 하위 신호 개수
-ABRUPT_ALONE_SIGNALS = 3
+# 다른 신호 없이 "평소 대비 급변"만으로 발동하려면 필요한 하위 신호 개수.
+#
+# **3 → 2 로 내렸다.** 예전에는 "짧아짐 / ㅋ 없음 / 이모지 없음" 이 따로 세어져 3이
+# 그냥 찼는데, 셋이 사실 한 가지라서 `_abrupt_flags` 에서 묶었다(거기 설명 참조).
+# 묶고 나니 3은 사실상 도달 불가라 명세의 `abrupt_change` 트리거가 통째로 죽는다 —
+# "됐어." "몰라." 같은 **진짜 냉랭한 단답**이 2개에서 막혔다.
+ABRUPT_ALONE_SIGNALS = 2
 
 # 인신공격 · 욕설. 맥락상 장난일 수 있으므로 룰은 후보만 잡고 확정은 LLM 이 한다.
 _INSULT_RE = re.compile(
@@ -82,22 +87,51 @@ _TOKEN_RE = re.compile(r"[^\s.,!?~…]+")
 # --------------------------------------------------------------------------
 # 룰 트리거
 # --------------------------------------------------------------------------
+# 짧은 **동의·긍정 응답**은 "짧아짐"으로 세지 않는다.
+#
+# 명세의 `abrupt_change` 는 "맥락 없는 단답"을 말한다. 그런데 "홍대도 좋아" 같은 동의는
+# 대화가 굴러가고 있다는 신호지 오해 유발이 아니다. **길이만 보면 둘이 구분되지 않는다.**
+#
+# 마침표 종결("알겠어.")은 그대로 센다 — 동의 어휘라도 마침표로 끊으면 차가워진다.
+# ⚠️ `하자` · `가자` · `보자` 는 넣지 않는다. **동의가 아니라 제안이고 부정일 수 있다** —
+# "그만하자" 가 동의로 잡혀서 급변 신호가 통째로 죽었다.
+_AGREEMENT_RE = re.compile(
+    r"(좋아|좋지|좋다|좋겠|좋은데|괜찮|그래|그러자|그러지|오케|오키|콜|찬성|맞아|맞네|동의)"
+)
+_DISAGREE_RE = re.compile(r"(안\s|말고|싫|별로|아니|못\s|그닥|글쎄|됐어|관심\s*없)")
+
+
+def _is_agreement(text: str) -> bool:
+    """상대 제안에 동의하는 짧은 응답인가."""
+    return bool(_AGREEMENT_RE.search(text)) and not _DISAGREE_RE.search(text)
+
+
 def _abrupt_flags(text: str, profile: SpeakerProfile) -> list[str]:
-    """평소 대비 급변 신호. 하나만으로는 약해서 2개 이상일 때만 트리거한다."""
+    """평소 대비 급변 신호. 하나만으로는 약해서 여러 개일 때만 트리거한다.
+
+    ⚠️ **상관된 신호를 따로 세지 않는다.** 짧아진 메시지에는 ㅋ 도 이모지도 당연히 없다 —
+    세 개를 각각 세면 **사실 하나를 세 번 세는 것**이라 `ABRUPT_ALONE_SIGNALS` 가 그냥
+    찬다. 실측에서 "홍대도 좋아"(5자)가 신호 3개로 발동했다.
+    """
     signals: list[str] = []
     length = _norm_len(text)
+    shortened = profile.avg_length >= 8 and length <= profile.avg_length * SHORT_RATIO
+    # 짧아진 것이 **동의 응답**이면 급변으로 세지 않는다 (위 `_is_agreement` 설명)
+    count_short = shortened and not _is_agreement(text)
 
     if _PERIOD_END_RE.search(text) and profile.period_rate < LOW_PERIOD_RATE:
         signals.append(f"평소 마침표 종결 {profile.period_rate:.0%} → 이번엔 마침표로 끝남")
 
-    if profile.laugh_per_msg >= LAUGH_BASELINE and not _LAUGH_RE.search(text):
-        signals.append(f"평소 ㅋ/ㅎ {profile.laugh_per_msg:.1f}개 → 이번엔 0개")
+    # 짧아진 게 아닐 때만 센다 (위 설명)
+    if not shortened:
+        if profile.laugh_per_msg >= LAUGH_BASELINE and not _LAUGH_RE.search(text):
+            signals.append(f"평소 ㅋ/ㅎ {profile.laugh_per_msg:.1f}개 → 이번엔 0개")
 
-    if profile.emoji_rate >= EMOJI_BASELINE and not _EMOJI_RE.search(text):
-        signals.append(f"평소 이모지 {profile.emoji_rate:.0%} → 이번엔 없음")
+        if profile.emoji_rate >= EMOJI_BASELINE and not _EMOJI_RE.search(text):
+            signals.append(f"평소 이모지 {profile.emoji_rate:.0%} → 이번엔 없음")
 
     if profile.avg_length >= 8:
-        if length <= profile.avg_length * SHORT_RATIO:
+        if count_short:
             signals.append(f"평소 {profile.avg_length:.0f}자 → 이번 {length}자로 짧아짐")
         elif length >= profile.avg_length * LONG_RATIO:
             signals.append(f"평소 {profile.avg_length:.0f}자 → 이번 {length}자로 길어짐")

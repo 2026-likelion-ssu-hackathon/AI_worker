@@ -1,0 +1,12 @@
+{
+  "analysisRequestId": "repro-0001",
+  "chatRoomId": 1,
+  "participants": [{ "participantKey": "USER_A" }, { "participantKey": "USER_B" }],
+  "messages": [
+    { "messageId": 301, "sender": "USER_A", "content": "이번 주말에 어디서 볼까?", "sentAt": "2026-08-15T19:00:00" },
+    { "messageId": 302, "sender": "USER_B", "content": "음 강남 어때? 거기 갈 데 많잖아", "sentAt": "2026-08-15T19:01:00" },
+    { "messageId": 303, "sender": "USER_A", "content": "강남은 사람 너무 많지 않나", "sentAt": "2026-08-15T19:02:00" },
+    { "messageId": 304, "sender": "USER_B", "content": "그럼 홍대는? 요즘 팝업 많더라", "sentAt": "2026-08-15T19:03:00" },
+    { "messageId": 305, "sender": "USER_A", "content": "홍대도 좋아", "sentAt": "2026-08-15T19:04:00" }
+  ]
+}
