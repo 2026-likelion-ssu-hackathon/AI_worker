@@ -35,6 +35,7 @@ CANDIDATE_LABEL = {
     "tone": "갈등 중재 (말투 교정)",
     "date": "데이트 코스 추천",
     "youtube": "유튜브 영상 추천",
+    "llm": "LLM 호출",
 }
 
 

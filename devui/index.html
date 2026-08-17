@@ -750,7 +750,7 @@ LLM 호출이 실패했거나 점수를 하나도 못 받았습니다. 경계가
     <div class="in">${warn}${rows}</div>
   </div>`;
 }
-const CAND_LABEL = { tone: "갈등 중재 (말투 교정)", date: "데이트 코스 추천", youtube: "유튜브 영상 추천" };
+const CAND_LABEL = { tone: "갈등 중재 (말투 교정)", date: "데이트 코스 추천", youtube: "유튜브 영상 추천", llm: "LLM 호출" };
 
 function visibleTo(r, viewer) {
   return r.visibilityType === "COUPLE" || r.targetParticipant === "USER_" + viewer;

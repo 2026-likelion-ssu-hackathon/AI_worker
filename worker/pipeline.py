@@ -29,6 +29,7 @@ import threading
 
 from pydantic import ValidationError
 
+from worker.llm import SLOW_CALL_SECONDS, USAGE
 from worker.models import AnalysisRequest, AnalysisResponse
 from worker.retrieve import warm_index
 from worker.router import Context, Trace, run, split
@@ -77,11 +78,24 @@ def analyze(payload: dict, persist: bool = True) -> tuple[AnalysisResponse, Trac
     # 데몬 스레드라 결과를 기다리지 않고, 뒤에서 `_get_store()` 가 같은 락을 잡는다.
     threading.Thread(target=warm_index, daemon=True).start()
 
+    # 이번 요청에서 난 LLM 호출만 보려고 위치를 잡아둔다 (USAGE 는 프로세스 전역 누적).
+    mark = len(USAGE.records)
+
     try:
         split(ctx)
         states, results = run(ctx)
     except Exception as exc:  # noqa: BLE001
         return _failed(request.analysis_request_id, "MODEL_ERROR", str(exc)), trace
+
+    # 비정상적으로 느린 호출을 남긴다. **판정을 바꾸지 않는다** — 왜 느렸는지 되짚을
+    # 단서만 만든다. 뺄셈이라 비용이 없다 (`llm.SLOW_CALL_SECONDS` 주석 참조).
+    for record in USAGE.records[mark:]:
+        if record.seconds >= SLOW_CALL_SECONDS:
+            trace.warn(
+                "llm",
+                f"{record.stage} {record.seconds:.1f}초 — 정상 범위(1~4초) 밖. "
+                "재시도가 끼었을 수 있다 (레이트 리밋·API 지연)",
+            )
 
     # 규격서 12장 — `COMPLETED` 는 "기능 결과 **또는 감정 분석 결과**가 존재".
     # 실 상태 표현이 상시라서 `states` 가 거의 항상 차고, 따라서 **`SKIPPED` 는 거의

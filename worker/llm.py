@@ -24,6 +24,15 @@ T = TypeVar("T", bound=BaseModel)
 # 판정 품질보다 반복 횟수가 중요한 단계라 응답이 빠른 모델로 내렸다.
 DEFAULT_MODEL = "openai:gpt-4.1-mini"
 
+# 이 시간을 넘긴 호출은 **비정상으로 보고 트레이스에 남긴다** (`pipeline.analyze`).
+#
+# 판정에 관여하지 않는다. 왜 두느냐면 — 한 요청이 22초 걸린 적이 있는데 화면에 단서가
+# 없었다. 단계별 시간은 보이지만 그게 정상 범위인지 알 방법이 없었고, LangChain 은
+# 429·5xx 재시도를 **조용히 삼켜서** 백오프가 그냥 "느린 호출"로 보인다.
+#
+# 정상 범위는 1~4초다 (gpt-4.1-mini, 입력 1~3천 토큰). 6초를 넘으면 대개 재시도가 끼었다.
+SLOW_CALL_SECONDS = 6.0
+
 
 @lru_cache(maxsize=4)
 def _model(with_temperature: bool):

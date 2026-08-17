@@ -1,0 +1,56 @@
+{
+  "analysisRequestId": "c783ec30-8a45-4c65-a542-f865c71a2f15",
+  "chatRoomId": 1,
+  "participants": [
+    {
+      "participantKey": "USER_A"
+    },
+    {
+      "participantKey": "USER_B"
+    }
+  ],
+  "messages": [
+    {
+      "messageId": 101,
+      "sender": "USER_A",
+      "content": "이번 주 토요일에 보자 나 그날 하루 종일 비어 ㅎㅎ",
+      "sentAt": "2026-08-15T19:02:00"
+    },
+    {
+      "messageId": 102,
+      "sender": "USER_B",
+      "content": "오 좋아 나도 토요일 괜찮아",
+      "sentAt": "2026-08-15T19:04:00"
+    },
+    {
+      "messageId": 103,
+      "sender": "USER_A",
+      "content": "근데 만나서 뭐하지? 딱히 생각해둔 게 없네",
+      "sentAt": "2026-08-15T19:06:00"
+    },
+    {
+      "messageId": 104,
+      "sender": "USER_B",
+      "content": "글쎄 밥은 먹어야 되는데 뭐 먹지",
+      "sentAt": "2026-08-15T19:09:00"
+    },
+    {
+      "messageId": 105,
+      "sender": "USER_A",
+      "content": "성수 쪽은 어때? 저번에 갔던 카페 근처 괜찮았잖아",
+      "sentAt": "2026-08-15T19:12:00"
+    },
+    {
+      "messageId": 106,
+      "sender": "USER_B",
+      "content": "성수 좋지 ㅋㅋ 거기 걷기도 좋고",
+      "sentAt": "2026-08-15T19:14:00"
+    },
+    {
+      "messageId": 107,
+      "sender": "USER_A",
+      "content": "아니 그래서 어디가.. 나만 지금 얘기하고 있잖아",
+      "sentAt": "2026-08-15T19:16:00"
+    }
+  ]
+}
