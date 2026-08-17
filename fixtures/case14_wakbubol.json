@@ -1,0 +1,12 @@
+{
+  "analysisRequestId": "c783ec30-8a45-4c65-a542-f865c71a2f14",
+  "chatRoomId": 1,
+  "participants": [{ "participantKey": "USER_A" }, { "participantKey": "USER_B" }],
+  "messages": [
+    { "messageId": 501, "sender": "USER_B", "content": "자기 왁뿌볼 알아?", "sentAt": "2026-08-15T23:05:00" },
+    { "messageId": 502, "sender": "USER_A", "content": "그게 뭔데 처음 들어봐", "sentAt": "2026-08-15T23:06:00" },
+    { "messageId": 503, "sender": "USER_B", "content": "왁뿌볼 터뜨리는 소리가 진짜 중독성 있어 ㅋㅋ", "sentAt": "2026-08-15T23:07:00" },
+    { "messageId": 504, "sender": "USER_A", "content": "아 그거 소리 듣는 거? 나 그런 거 좋아하는데", "sentAt": "2026-08-15T23:08:00" },
+    { "messageId": 505, "sender": "USER_B", "content": "어제 왁뿌볼 소리만 한 시간 듣다가 잤잖아", "sentAt": "2026-08-15T23:09:00" }
+  ]
+}
