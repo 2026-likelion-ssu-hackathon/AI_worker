@@ -1,0 +1,12 @@
+{
+  "analysisRequestId": "c783ec30-8a45-4c65-a542-f865c71a2f13",
+  "chatRoomId": 1,
+  "participants": [{ "participantKey": "USER_A" }, { "participantKey": "USER_B" }],
+  "messages": [
+    { "messageId": 401, "sender": "USER_A", "content": "나 어제 먹방 보다가 그냥 잠들었잖아 ㅋㅋ", "sentAt": "2026-08-15T22:10:00" },
+    { "messageId": 402, "sender": "USER_B", "content": "ㅋㅋㅋ 무슨 먹방 봤는데", "sentAt": "2026-08-15T22:11:00" },
+    { "messageId": 403, "sender": "USER_A", "content": "햄버거 먹방인데 진짜 맛있어 보이더라", "sentAt": "2026-08-15T22:12:00" },
+    { "messageId": 404, "sender": "USER_B", "content": "아 나도 먹방 보면 배고파져서 큰일이야", "sentAt": "2026-08-15T22:13:00" },
+    { "messageId": 405, "sender": "USER_A", "content": "그니까 먹방은 밤에 보면 안 되는데 자꾸 보게 돼", "sentAt": "2026-08-15T22:14:00" }
+  ]
+}

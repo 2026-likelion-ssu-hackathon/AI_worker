@@ -57,6 +57,7 @@ from worker.models import (
     ToneGateResult,
     ToneJudgeLLMOutput,
     ToneResultData,
+    TopicLLMOutput,
     to_key,
     to_speaker,
 )
@@ -75,6 +76,12 @@ from worker.ytapi import Video
 # LLM 판정(`yt_concern.md`)도 "한창 싸우는 중이면 false"로 막고 있지만, 규칙으로 한 번 더 막는다.
 # 정책이 바뀌면 이 상수만 False 로 두면 된다.
 SUPPRESS_YOUTUBE_WHEN_TONE = True
+
+# 유튜브 **화제 갈래**가 비켜야 하는 데이트 신호.
+#
+# 4종 중 `category`("배고파" · "카페" · "맛집")는 뺐다 — 단어 하나로 걸려서 먹방 얘기가
+# 데이트 의도로 잡힌다. 나머지 셋은 실제로 약속을 잡는 신호라 장소 추천이 맞다.
+DATE_INTENT_STRONG = {"plan_question", "schedule_fixed", "recall"}
 
 
 class Trace:
@@ -105,6 +112,7 @@ class Trace:
         self.date_places: list[KakaoPlace] = []
         # 유튜브
         self.concern: ConcernLLMOutput | None = None
+        self.topic: TopicLLMOutput | None = None  # 일상 화제 갈래
         self.yt_candidates: list[Video] = []
         self.yt_picked: Video | None = None
 
@@ -303,24 +311,32 @@ class DateCandidate:
 # 후보 3 — 유튜브 영상 추천
 # --------------------------------------------------------------------------
 class YoutubeCandidate:
+    """명세의 두 갈래를 모두 태운다 — **관계 고민 신호 또는 공통 관심 주제**
+    (`docs/spec-v2.md` 3장).
+
+        ① 고민 갈래   싸우고 서먹할 때. 노출 범위를 LLM 이 정한다 (개별/공통)
+        ② 화제 갈래   평범한 일상 대화에서 화제가 뚜렷할 때. 항상 COUPLE
+
+    **고민이 우선이다.** 둘 다 신호가 있으면 고민 갈래를 탄다 — 감정이 걸린 대화에
+    먹방 영상을 띄우면 눈치가 없다.
+
+    두 갈래는 **프롬프트도 화면 문구도 따로**다. 판정 기준이 다르기 때문이다 —
+    고민은 "이 상황에 도움이 되는가", 화제는 "그 소재를 실제로 다루는가".
+    """
+
     name = "youtube"
 
     def build(self, ctx: Context) -> AiResult | None:
-        trigger_ids = youtube.check_concern_gate(ctx.active)
-        if not trigger_ids:
-            return None
+        concern_ids = youtube.check_concern_gate(ctx.active)
+        if concern_ids:
+            return self._concern(ctx, concern_ids)
+        return self._topic(ctx)
 
-        if not youtube.available():
-            ctx.trace.skip(self.name, "YOUTUBE_API_KEY 없음 — 영상을 지어내지 않고 미발동")
-            return None
+    # ---------------------------------------------------------------- 공통
+    def _candidates(self, ctx: Context, queries: list[str]) -> list[Video] | None:
+        """검색 → 금지어·중복 제외. 쓸 후보가 없으면 None."""
+        videos = youtube.find_candidates(queries)
 
-        concern = youtube.classify_concern(ctx.active)
-        ctx.trace.concern = concern
-        if not concern.should_recommend or not concern.queries:
-            ctx.trace.skip(self.name, "LLM 판정 — 관계 고민 신호 아님")
-            return None
-
-        videos = youtube.find_candidates(concern.queries)
         # 제목·설명에 금지어가 든 영상은 LLM 에 보이기 전에 뺀다.
         # 우리가 쓴 문장이 아니어도 화면에는 그대로 뜬다.
         videos = [
@@ -342,6 +358,28 @@ class YoutubeCandidate:
         if not videos:
             ctx.trace.skip(self.name, "후보 영상 없음 — 침묵")
             return None
+        return videos
+
+    def _ready(self, ctx: Context) -> bool:
+        if youtube.available():
+            return True
+        ctx.trace.skip(self.name, "YOUTUBE_API_KEY 없음 — 영상을 지어내지 않고 미발동")
+        return False
+
+    # ---------------------------------------------------------------- ① 고민
+    def _concern(self, ctx: Context, trigger_ids: list[int]) -> AiResult | None:
+        if not self._ready(ctx):
+            return None
+
+        concern = youtube.classify_concern(ctx.active)
+        ctx.trace.concern = concern
+        if not concern.should_recommend or not concern.queries:
+            ctx.trace.skip(self.name, "LLM 판정 — 관계 고민 신호 아님")
+            return None
+
+        videos = self._candidates(ctx, concern.queries)
+        if videos is None:
+            return None
 
         pick = youtube.pick_video(ctx.active, concern, videos)
         if not 0 <= pick.picked_index < len(videos):
@@ -362,6 +400,63 @@ class YoutubeCandidate:
                 return result
             return youtube.to_result(
                 concern, videos[again.picked_index], again.recommendation_reason, trigger_ids
+            )
+
+        return _fit(ctx, self.name, result, _again)
+
+    # ---------------------------------------------------------------- ② 화제
+    def _topic(self, ctx: Context) -> AiResult | None:
+        # **데이트 의도가 뚜렷하면 화제 갈래를 타지 않는다.**
+        # "주말에 뭐 할까" 에는 장소 추천이 나가야 한다. 영상이 끼어들면 자리를 뺏는다.
+        #
+        # 데이트 **결과**가 아니라 **게이트**(룰)를 본다. 결과를 기다리면 데이트 체인
+        # (계획 → 카카오 → 문구, 약 6초)이 끝날 때까지 유튜브가 묶여서 병렬이 깨진다.
+        # 게이트는 정규식이라 공짜다.
+        #
+        # ⚠️ **`category` 단독은 막지 않는다.** 그 신호는 "배고파" · "맛집" 같은 단어
+        # 하나로 걸려서, **먹방 얘기가 통째로 데이트 의도로 잡힌다** (실측 — case13).
+        # 약속을 잡는 신호(계획 질문 · 일정 확정 · 이전 약속 재언급)일 때만 비킨다.
+        # 약한 신호로 데이트가 실제로 발동하면 `run()` 이 조립 시점에 뺀다.
+        kinds = set(date_course.check_date_gate(ctx.active).kinds)
+        if kinds & DATE_INTENT_STRONG:
+            ctx.trace.skip(self.name, "약속을 잡는 대화 — 장소 추천에 자리를 넘김")
+            return None
+
+        trigger_ids = youtube.check_topic_gate(ctx.active)
+        if not trigger_ids:
+            return None
+
+        if not self._ready(ctx):
+            return None
+
+        topic = youtube.classify_topic(ctx.active)
+        ctx.trace.topic = topic
+        if not topic.should_recommend or not topic.queries:
+            ctx.trace.skip(self.name, "LLM 판정 — 영상으로 이어 붙일 화제가 아님")
+            return None
+
+        videos = self._candidates(ctx, topic.queries)
+        if videos is None:
+            return None
+
+        pick = youtube.pick_topic_video(ctx.active, topic, videos)
+        if not 0 <= pick.picked_index < len(videos):
+            ctx.trace.skip(self.name, "후보 전원 탈락 — 침묵")
+            return None
+
+        video = videos[pick.picked_index]
+        ctx.trace.yt_picked = video
+        result = youtube.to_topic_result(video, pick.recommendation_reason, trigger_ids)
+        if not is_clean(result):
+            ctx.trace.skip(self.name, f"금지어 필터 — '{banned_in(result)}'")
+            return None
+
+        def _again() -> AiResult:
+            again = youtube.pick_topic_video(ctx.active, topic, videos)
+            if not 0 <= again.picked_index < len(videos):
+                return result
+            return youtube.to_topic_result(
+                videos[again.picked_index], again.recommendation_reason, trigger_ids
             )
 
         return _fit(ctx, self.name, result, _again)
@@ -509,6 +604,15 @@ def run(ctx: Context) -> tuple[list[EmotionAnalysis], list[AiResult]]:
             youtube.name: f_youtube.result() if f_youtube is not None else None,
         }
         states = f_state.result()
+
+    # 약한 데이트 신호(`category` 단독)로 화제 갈래가 돌았는데 데이트가 실제로 발동했다면
+    # 화제 갈래는 뺀다. **"데이트 코스가 떠야 할 때는 영상을 띄우지 않는다"** 가 규칙이다.
+    # 여기서 빼는 것은 지연을 늘리지 않는다 — 둘 다 이미 병렬로 끝나 있다.
+    # (고민 갈래는 빼지 않는다. 갈등과 데이트는 성격이 달라 같이 떠도 어색하지 않다.)
+    if by_name[date.name] is not None and ctx.trace.topic is not None:
+        if by_name[youtube.name] is not None:
+            ctx.trace.skip(youtube.name, "데이트 코스가 발동한 요청 — 화제 갈래는 자리를 넘김")
+        by_name[youtube.name] = None
 
     results: list[AiResult] = []
     for candidate in CANDIDATES:

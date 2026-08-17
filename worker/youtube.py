@@ -22,12 +22,13 @@ from __future__ import annotations
 import re
 
 from worker import ytapi
-from worker.copy import YOUTUBE_GUIDE
+from worker.copy import YOUTUBE_GUIDE, YOUTUBE_TOPIC_GUIDE
 from worker.llm import ask, load_prompt
 from worker.models import (
     AiResult,
     ConcernLLMOutput,
     Message,
+    TopicLLMOutput,
     VideoPickLLMOutput,
     YoutubeResultData,
     to_key,
@@ -59,6 +60,63 @@ def check_concern_gate(messages: list[Message]) -> list[int]:
         return []
     recent = sorted(messages, key=lambda m: m.sent_at)
     return [m.message_id for m in recent if _CONCERN_RE.search(m.content)]
+
+
+# --------------------------------------------------------------------------
+# 룰 프리필터 ② — 화제가 뚜렷한가 (명세 "공통 관심 주제")
+# --------------------------------------------------------------------------
+# 고민 어휘처럼 목록으로 열거할 수 없다. "먹방" · "왁뿌볼" · "캠핑" … 끝이 없다.
+# 그래서 **어휘가 아니라 모양**을 본다 — 같은 낱말이 여러 발화에 걸쳐 반복되면
+# 화제가 하나로 모여 있다는 뜻이다.
+#
+# 이것도 확정이 아니라 **LLM 에게 물어볼 만한가**만 가른다. 잡담마다 분류 호출이
+# 나가지 않게 막는 자리다 (고민 갈래의 프리필터와 같은 역할).
+TOPIC_MIN_REPEAT = 2   # 몇 개의 발화에 걸쳐 같은 낱말이 나와야 하는가
+TOPIC_MIN_LEN = 2      # 낱말 최소 길이 (한 글자는 조사·감탄사가 섞인다)
+
+_WORD_RE = re.compile(r"[가-힣A-Za-z0-9]+")
+
+# 어느 대화에나 나오는 말. 이게 반복된다고 화제가 뚜렷한 건 아니다.
+_TOPIC_STOP = {
+    "그래", "그거", "그건", "그럼", "근데", "진짜", "완전", "너무", "그냥", "약간",
+    "오늘", "내일", "어제", "지금", "아까", "이따", "나중", "요즘", "저번", "다음",
+    "우리", "너는", "나는", "내가", "네가", "우린", "자기", "오빠",
+    "생각", "얘기", "이야기", "느낌", "정도", "때문", "이제", "아직", "많이", "조금",
+    "하는", "하고", "했어", "해서", "이거", "저거", "뭐야", "맞아", "그리고",
+}
+
+
+def _topic_words(text: str) -> set[str]:
+    return {
+        w for w in _WORD_RE.findall(text)
+        if len(w) >= TOPIC_MIN_LEN and w not in _TOPIC_STOP
+    }
+
+
+def check_topic_gate(messages: list[Message]) -> list[int]:
+    """화제가 뚜렷한 발화 id. 없으면 빈 목록 → LLM 을 부르지 않는다.
+
+    같은 낱말이 `TOPIC_MIN_REPEAT` 개 이상의 **서로 다른 발화**에 나오면 뚜렷하다고 본다.
+    한 발화 안에서 같은 말을 두 번 하는 것은 세지 않는다.
+    """
+    if not messages:
+        return []
+
+    recent = sorted(messages, key=lambda m: m.sent_at)
+    seen: dict[str, list[int]] = {}
+    for m in recent:
+        for word in _topic_words(m.content):
+            seen.setdefault(word, []).append(m.message_id)
+
+    ids: set[int] = set()
+    for word, hits in seen.items():
+        if len(set(hits)) >= TOPIC_MIN_REPEAT:
+            ids.update(hits)
+    return sorted(ids)
+
+
+def classify_topic(messages: list[Message]) -> TopicLLMOutput:
+    return ask(TopicLLMOutput, load_prompt("yt_topic"), format_transcript(messages))
 
 
 # --------------------------------------------------------------------------
@@ -113,21 +171,21 @@ def pick_video(
 # --------------------------------------------------------------------------
 # 조립
 # --------------------------------------------------------------------------
-def to_result(
-    concern: ConcernLLMOutput,
+def _result(
     video: Video,
     reason: str,
     trigger_message_ids: list[int],
+    guide: str,
+    target: str | None,
 ) -> AiResult:
-    individual = concern.scope == "individual" and concern.target in ("A", "B")
     return AiResult(
         result_type="YOUTUBE_RECOMMENDATION",
-        visibility_type="INDIVIDUAL" if individual else "COUPLE",
-        target_participant=to_key(concern.target) if individual else None,  # type: ignore[arg-type]
+        visibility_type="INDIVIDUAL" if target else "COUPLE",
+        target_participant=to_key(target) if target else None,  # type: ignore[arg-type]
         content_type="MIXED",
         trigger_message_ids=trigger_message_ids,
         result_data=YoutubeResultData(
-            guide_message=YOUTUBE_GUIDE,
+            guide_message=guide,
             video_id=video.video_id,
             title=video.title,
             video_url=video.url,
@@ -136,6 +194,60 @@ def to_result(
             recommendation_reason=reason.strip(),
             video_summary=video.summary(),
         ),
+    )
+
+
+
+def pick_topic_video(
+    messages: list[Message], topic: TopicLLMOutput, videos: list[Video]
+) -> VideoPickLLMOutput:
+    """일상 화제 갈래의 선정. 고민 갈래와 **프롬프트가 다르다.**
+
+    보는 기준이 다르기 때문이다 — 고민은 "이 상황에 도움이 되는가", 화제는 "그 소재를
+    실제로 다루는가". 한 프롬프트에 둘을 넣으면 판정이 흐려진다.
+    """
+    body = "\n".join(
+        [
+            "## 최근 대화",
+            format_transcript(messages),
+            "",
+            "## 판정된 화제",
+            f"- 화제: {topic.topic}",
+            f"- 판정 근거: {topic.note}",
+            "",
+            "## 후보 영상",
+            _candidate_block(videos),
+        ]
+    )
+    return ask(VideoPickLLMOutput, load_prompt("yt_pick_topic"), body)
+
+
+def to_result(
+    concern: ConcernLLMOutput,
+    video: Video,
+    reason: str,
+    trigger_message_ids: list[int],
+) -> AiResult:
+    """고민 갈래 — 노출 범위를 LLM 이 정한다 (개별/공통)."""
+    individual = concern.scope == "individual" and concern.target in ("A", "B")
+    return _result(
+        video, reason, trigger_message_ids,
+        guide=YOUTUBE_GUIDE,
+        target=concern.target if individual else None,
+    )
+
+
+def to_topic_result(video: Video, reason: str, trigger_message_ids: list[int]) -> AiResult:
+    """일상 화제 갈래 — **항상 COUPLE 이다.**
+
+    화제는 둘이 같이 하던 얘기고, 감춰야 할 이유가 없다. 개별로 띄우면 상대만 모르는
+    영상이 생겨서 "왜 나만 안 보이지"가 된다 — 개별 노출은 지적성 피드백을 감추기 위한
+    장치지 취향 추천을 위한 게 아니다.
+    """
+    return _result(
+        video, reason, trigger_message_ids,
+        guide=YOUTUBE_TOPIC_GUIDE,
+        target=None,
     )
 
 
