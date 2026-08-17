@@ -41,6 +41,7 @@ from worker.copy import TONE_GUIDE
 from worker.date_course import MEMORY_K, MEMORY_KINDS, MIN_PLACES
 from worker.extract import extract_memories
 from worker.filter import banned_in, banned_in_state, find_banned, is_clean
+from worker.limits import enforce, over_limit
 from worker.models import (
     AiResult,
     AnalysisRequest,
@@ -146,6 +147,31 @@ class Candidate(Protocol):
         ...
 
 
+def _fit(ctx: Context, name: str, result: AiResult, regenerate) -> AiResult:
+    """화면 글자 수 한도를 지킨다 — **1회 재생성, 그래도 넘으면 절단.**
+
+    금지어 필터와 같은 구조인데 **마지막 처리가 다르다.** 금지어는 절대 제약이라 못 지키면
+    버리지만, 길이는 조금 넘었다고 기능을 통째로 미발동시킬 이유가 없다. 잘라서라도 내보낸다.
+
+    프롬프트에 자수를 적어두는 것만으로는 안 지켜진다 — 실측에서 넘는 출력이 계속 나왔다
+    (`worker/limits.py`).
+    """
+    hit = over_limit(result)
+    if hit is None:
+        return result
+
+    field, actual, limit = hit
+    ctx.trace.skip(name, f"글자 수 초과 — {field} {actual}자 > {limit}자, 재생성")
+
+    retry = regenerate()
+    if over_limit(retry) is None:
+        return retry
+
+    field, actual, limit = over_limit(retry)  # type: ignore[misc]
+    ctx.trace.skip(name, f"재생성도 초과 — {field} {actual}자 > {limit}자, 잘라서 내보냄")
+    return enforce(retry)
+
+
 # --------------------------------------------------------------------------
 # 후보 1 — 갈등 중재 (말투 교정 제안)
 # --------------------------------------------------------------------------
@@ -186,13 +212,13 @@ class ToneCandidate:
 
         # 금지어에 걸리면 1회 재생성. 또 걸리면 내보내지 않는다.
         result = _make()
-        if is_clean(result):
-            return result
-        retry = _make()
-        if is_clean(retry):
-            return retry
-        ctx.trace.skip(self.name, f"금지어 필터 — '{banned_in(retry)}'")
-        return None
+        if not is_clean(result):
+            result = _make()
+            if not is_clean(result):
+                ctx.trace.skip(self.name, f"금지어 필터 — '{banned_in(result)}'")
+                return None
+
+        return _fit(ctx, self.name, result, _make)
 
 
 # --------------------------------------------------------------------------
@@ -238,11 +264,18 @@ class DateCandidate:
             ctx.trace.skip(self.name, f"카카오 검색 결과 부족 ({len(course)}곳)")
             return None
 
-        reason = date_course.write_reason(ctx.active, memories, plan, course)
-        result = date_course.to_result(plan, reason, course, gate.message_ids)
+        def _make() -> AiResult:
+            reason = date_course.write_reason(ctx.active, memories, plan, course)
+            return date_course.to_result(plan, reason, course, gate.message_ids)
+
+        result = _make()
         if not is_clean(result):
             ctx.trace.skip(self.name, f"금지어 필터 — '{banned_in(result)}'")
             return None
+
+        # 글자 수만 넘은 것이면 문구 생성(`write_reason`)만 다시 돈다.
+        # 카카오 검색과 계획은 이미 확정이라 다시 부르지 않는다.
+        result = _fit(ctx, self.name, result, _make)
 
         # 근거로 삼은 기억을 소모 처리한다. 같은 소재가 매번 다시 나오지 않게 한다.
         if memories:
@@ -305,7 +338,17 @@ class YoutubeCandidate:
         if not is_clean(result):
             ctx.trace.skip(self.name, f"금지어 필터 — '{banned_in(result)}'")
             return None
-        return result
+
+        # 재생성은 `pick_video` 만 다시 돈다. 검색(쿼터 100 units)은 다시 부르지 않는다.
+        def _again() -> AiResult:
+            again = youtube.pick_video(ctx.active, concern, videos)
+            if not 0 <= again.picked_index < len(videos):
+                return result
+            return youtube.to_result(
+                concern, videos[again.picked_index], again.recommendation_reason, trigger_ids
+            )
+
+        return _fit(ctx, self.name, result, _again)
 
 
 # 우선순위 순. 규격서상 여러 개가 동시에 나갈 수 있으므로 앞이 뒤를 막지 않는다.

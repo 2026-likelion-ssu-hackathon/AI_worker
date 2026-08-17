@@ -137,7 +137,7 @@ router.run()              분절 이후를 병렬로 — 독립인 것은 동시
    │  └ 기억 추출 → 데이트 계획 → 카카오 → 데이트 문구
    │                └ 유튜브 (말투 결과를 본 뒤)
    ↓                      후보 결과는 우선순위 순 정렬 — 위젯 ②번 줄
-filter                    금지어 하드 필터 (①·②번 줄 둘 다)
+filter · limits           금지어 하드 필터 + 화면 글자 수 한도
    ↓
 AnalysisResponse          COMPLETED / SKIPPED / FAILED
 ```
@@ -193,7 +193,7 @@ strict json_schema 가 nullable·date-time 을 잘 못 다뤄서 sentinel 문자
 **`pipeline.py`** — 파싱 실패 → `INVALID_REQUEST`, 참여자 목록에 없는 발화자 → `INVALID_PARTICIPANT`,
 그 외 예외 → `MODEL_ERROR`. **예외를 밖으로 던지지 않는다.** 워커가 죽으면 채팅 서버가
 타임아웃까지 붙잡혀 있게 된다. 메시지를 `(sent_at, message_id)` 로 정렬해 `Context` 를 만들고,
-`split()` → `harvest_memories()` → `read_state()` → `route()` 순으로 부른다.
+`split()` 다음에 `run()` 을 부른다 (분절 이후는 병렬).
 `results` 와 `emotionAnalyses` 가 **둘 다** 비었을 때만 `SKIPPED` 다 — 실 상태 표현이
 상시라 실제로는 거의 `COMPLETED` 로 나간다.
 
@@ -205,6 +205,7 @@ strict json_schema 가 nullable·date-time 을 잘 못 다뤄서 sentinel 문자
 | `state.py` | 실 상태 표현. 위젯 ①번 줄을 매 요청 만든다 (게이트 없음) |
 | `router.py` | 후보 3개를 순서대로 돌려 `results` 배열을 만든다. `Context` / `Trace` 정의 |
 | `filter.py` | 금지어 하드 필터 |
+| `limits.py` | 화면 글자 수 한도. 넘으면 재생성 1회 → 절단 |
 | `copy.py` | `guideMessage` 고정 문구 3종 + 상태 문구 사전 5종. PM·디자인 소유 |
 
 **`segment.py`** — ① 3시간 이상 공백에서 룰로 자르고 ② **마지막 조각만** LLM 이 채점하고
@@ -269,6 +270,25 @@ LLM 은 **점수와 참/거짓만** 낸다 — 근거 문구를 받지 않는다
 사람 평가("무례하시네요")는 프롬프트가 다룬다 — 단어 목록으로 구분할 수 없는 영역이다.
 `AiResult`(②번 줄) 말고 `EmotionAnalysis`(①번 줄)도 `banned_in_state()` 로 따로 검사한다 —
 `visible_texts()` 는 `AiResult` 만 보므로 그냥 두면 상태 문구가 필터를 통과한다.
+
+**`limits.py`** — 화면 글자 수 한도. 디자인 실측값이라 넘으면 **화면에서 잘린다**.
+잘린 문장은 안 읽히는 게 아니라 뜻이 바뀐다 — 근거가 사라진 채 "…들릴 수 있어" 만 남는다.
+
+```
+situationDiagnosis 35 · alternativeSentence 73 · correctionReason 52
+데이트 recommendationReason 54 (한 줄 27자 x 두 줄) · 유튜브 50 · stateText 10
+```
+
+**프롬프트에 자수를 적는 것만으로는 안 지켜진다** — 실측에서 넘는 출력이 계속 나왔다.
+`over_limit()` 로 검사하고 넘으면 **1회 재생성, 그래도 넘으면 `shorten()` 이 어절 경계에서
+자른다.** 금지어 필터와 같은 구조인데 마지막 처리가 다르다: 금지어는 절대 제약이라 버리지만,
+길이는 조금 넘었다고 기능을 통째로 미발동시킬 이유가 없다.
+
+재생성은 **문구 단계만** 다시 돈다 — 데이트는 카카오 검색을, 유튜브는 검색(쿼터 100 units)을
+다시 부르지 않는다. `alternativeSentence` 는 화면이 73자까지 받지만 프롬프트 목표는 45자다.
+복사 버튼이 없어서 보고 외워 타이핑해야 하기 때문이다 — **상한과 목표는 다르다.**
+**워커 출력이 전부 화면에 들어가는 건 아니라서** 한도를 받은 필드만 `MAX` 에 넣는다.
+유튜브 영상 제목은 외부 값이라 워커가 줄이지 않는다.
 
 **`copy.py`** — 임포트 시점에 `STATE_TEXT` 사전 5개를 검사한다(10자 · 어미 · 금지어).
 문구가 상수라는 건 미리 전부 검사할 수 있다는 뜻이다 — PM 이 문구를 바꿔도 규격 위반이면
