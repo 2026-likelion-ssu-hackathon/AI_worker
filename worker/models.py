@@ -430,8 +430,10 @@ class DatePlanLLMOutput(BaseModel):
     meal_queries: list[str]   # 밥 — 식당 검색어 2개
     sight_queries: list[str]  # 구경 — 문화시설·명소·소품샵 검색어 2개
     cafe_queries: list[str]   # 카페 — 검색어 2개
-    course_name: str
-    course_summary: str
+
+    # ⚠️ **코스명·요약을 여기서 받지 않는다.** `write_reason` 이 카카오가 준 실제 상호를
+    # 보고 다시 쓰고 `to_result` 는 그쪽 값만 쓴다 — 여기서 만들면 그대로 버려진다.
+    # 출력 토큰이 곧 지연이라(50%↓ → 최대 50%↓) 버릴 것을 만들게 하지 않는다.
     reason_seed: str     # 어떤 발화·시점을 근거로 삼았는지 (원문 인용 포함)
 
 

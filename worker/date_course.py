@@ -378,8 +378,6 @@ def write_reason(
             _memory_block(memories),
             "",
             "## 계획 단계에서 정한 방향",
-            f"- 코스명(임시): {plan.course_name}",
-            f"- 요약(임시): {plan.course_summary}",
             f"- 근거: {plan.reason_seed}",
             "",
             "## 확정된 장소 (카카오 로컬 검색 결과 — 이름을 바꾸지 말 것)",

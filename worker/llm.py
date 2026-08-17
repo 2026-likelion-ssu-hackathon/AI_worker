@@ -24,6 +24,25 @@ T = TypeVar("T", bound=BaseModel)
 # 판정 품질보다 반복 횟수가 중요한 단계라 응답이 빠른 모델로 내렸다.
 DEFAULT_MODEL = "openai:gpt-4.1-mini"
 
+# **단계별 모델.** 스키마 이름 → 모델. 없으면 `DEFAULT_MODEL`.
+#
+# ⚠️ **지금은 비어 있다. 채우기 전에 반드시 A/B 를 돌리고 결과를 남길 것.**
+# `gpt-4.1-nano` 로 7개 단계를 전부 재봤고 **하나도 통과하지 못했다** (`worker-tasks.md` 17장).
+#
+#     분절 채점    14개 중 2개에서 경계를 통째로 놓친다 (case2 4→1, case5 2→1)
+#     실 상태 채점  점수를 낮게 매겨 화면이 전부 "평온해요"가 된다
+#     말투 판정    case8_banter 를 2/2 로 갈등 판정 — 장난에 교정 카드가 뜬다
+#     데이트 계획   프롬프트가 "0건 나온다"고 금지한 검색어를 만든다 (`분위기 좋은 카페`)
+#     데이트 문구   근거가 사라지고 장소 설명으로 바뀐다
+#     말투 생성    주어가 '나'에서 '너'로 돌아가고, 진단문을 대체 문장 자리에 넣는다
+#     고민 분류    `apology` 를 `contact` 로 뭉갠다. **게다가 mini 보다 느리다**
+#     화제 분류    격리 테스트는 통과했는데 파이프라인에서 깨졌다 — `햄버거 먹방` 대화에
+#                 `쯔양 먹방` 을 검색해 소고기 영상을 물어온다. 구체 소재를 놓친다
+#
+# 마지막 것이 교훈이다. **단계만 떼어 재면 통과한 것처럼 보인다** — 뒤 단계(검색·선정)에
+# 미치는 영향은 파이프라인 전체를 돌려야 보인다.
+STAGE_MODEL: dict[str, str] = {}
+
 # 이 시간을 넘긴 호출은 **비정상으로 보고 트레이스에 남긴다** (`pipeline.analyze`).
 #
 # 판정에 관여하지 않는다. 왜 두느냐면 — 한 요청이 22초 걸린 적이 있는데 화면에 단서가
@@ -34,9 +53,8 @@ DEFAULT_MODEL = "openai:gpt-4.1-mini"
 SLOW_CALL_SECONDS = 6.0
 
 
-@lru_cache(maxsize=4)
-def _model(with_temperature: bool):
-    name = os.getenv("KAKAPO_MODEL", DEFAULT_MODEL)
+@lru_cache(maxsize=8)
+def _model(with_temperature: bool, name: str):
     raw = os.getenv("KAKAPO_TEMPERATURE", "0.3").strip()
     if with_temperature and raw:
         return init_chat_model(name, temperature=float(raw))
@@ -114,8 +132,10 @@ def ask(schema: type[T], system: str, user: str) -> T:
     받으면 usage_metadata 가 딸려오지 않아 비용을 알 수 없다.
     """
     messages = [("system", system), ("human", user)]
+    # 기본 모델은 환경변수로, 단계별 예외는 `STAGE_MODEL` 로 정한다.
+    name = STAGE_MODEL.get(schema.__name__) or os.getenv("KAKAPO_MODEL", DEFAULT_MODEL)
     for with_temperature in (True, False):
-        model = _model(with_temperature).with_structured_output(
+        model = _model(with_temperature, name).with_structured_output(
             schema, method="json_schema", strict=True, include_raw=True
         )
         started = time.perf_counter()
