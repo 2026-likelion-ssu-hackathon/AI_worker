@@ -40,6 +40,13 @@ _indexed_ids: set[str] = set()
 # `_indexed_ids` 갱신이 엇갈려 일부 기억이 인덱스에서 빠진다.
 _store_lock = threading.Lock()
 
+# 파일 읽기·쓰기 락. 기억 추출(쓰기)과 데이트 코스의 RAG 검색(읽기)이 **이제 동시에 돈다**
+# (`router.run()`). 락이 없으면 쓰는 중인 JSON 을 읽어 파싱이 터진다.
+#
+# ⚠️ **`_store_lock` 을 잡은 채로 이걸 잡지 말 것.** `_get_store()` 는 store → io 순으로
+# 잡고, `save_memories()` 는 io 를 놓은 뒤에 store 를 잡는다. 순서가 엇갈리면 교착이다.
+_io_lock = threading.Lock()
+
 
 def now_kst() -> datetime:
     return datetime.now(KST)
@@ -49,6 +56,11 @@ def now_kst() -> datetime:
 # 파일 I/O
 # --------------------------------------------------------------------------
 def load_memories() -> list[Memory]:
+    with _io_lock:
+        return _load_locked()
+
+
+def _load_locked() -> list[Memory]:
     if not MEMORY_FILE.exists():
         return []
     raw = json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
@@ -56,6 +68,7 @@ def load_memories() -> list[Memory]:
 
 
 def _write(memories: list[Memory]) -> None:
+    """**`_io_lock` 을 잡은 상태에서만 부른다.**"""
     MEMORY_FILE.write_text(
         json.dumps(
             [json.loads(m.model_dump_json()) for m in memories],
@@ -83,7 +96,7 @@ def _get_store() -> InMemoryVectorStore:
                 model=os.getenv("KAKAPO_EMBEDDING_MODEL", "text-embedding-3-small")
             )
             _store = InMemoryVectorStore(embeddings)
-            _index_locked(load_memories())
+            _index_locked(_load_locked())
         return _store
 
 
@@ -202,28 +215,34 @@ def retrieve(recent: str, k: int = 3, now: datetime | None = None) -> Memory | N
 def mark_used(memory_id: str, now: datetime | None = None, persist: bool = True) -> None:
     if not persist:
         return
-    memories = load_memories()
-    for m in memories:
-        if m.id == memory_id:
-            m.used_at = now or now_kst()
-            break
-    else:
-        return
-    _write(memories)
+    with _io_lock:
+        memories = _load_locked()
+        for m in memories:
+            if m.id == memory_id:
+                m.used_at = now or now_kst()
+                break
+        else:
+            return
+        _write(memories)
 
 
 def save_memories(new: list[Memory], persist: bool = True) -> list[Memory]:
     """`extract.py` 가 뽑은 기억을 저장소에 넣는다. 같은 id 는 건너뛴다."""
     if not new:
         return []
-    memories = load_memories()
-    known = {m.id for m in memories}
-    added = [m for m in new if m.id not in known]
-    if not added:
-        return []
-    memories.extend(added)
-    if persist:
-        _write(memories)
+
+    with _io_lock:
+        memories = _load_locked()
+        known = {m.id for m in memories}
+        added = [m for m in new if m.id not in known]
+        if not added:
+            return []
+        memories.extend(added)
+        if persist:
+            _write(memories)
+
+    # **락을 놓고 인덱싱한다.** `_index` 가 `_store_lock` 을 잡는데, io 를 쥔 채로 잡으면
+    # `_get_store()`(store → io)와 순서가 엇갈려 교착이 된다.
     if _store is not None:
         _index(added)
     return added
