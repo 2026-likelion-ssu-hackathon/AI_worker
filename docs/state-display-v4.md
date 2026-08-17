@@ -6,7 +6,7 @@
 | 원문 | PM 기능 명세 "실 상태 표현 (상대방 감정 showing)" + 디자인 확정 5종 |
 | 코드 | `worker/state.py` · `worker/prompts/state.md` · `worker/copy.py` · `worker/filter.py` |
 | 범위 | 워커 파이프라인. **연동 규격 변경 없음** — 서버 동작 확인 2건 (`contract-v1.md` 11장) |
-| 서버 전달 | `docs/server-handoff-v5.md` |
+| 서버 전달 | `docs/server-handoff.md` |
 | 관련 | `docs/contract-v1.md` 11·12장 · `docs/contract-review.md` · `docs/spec-v2.md` · `CLAUDE.md` 절대 제약 |
 
 이 문서는 **PM 명세 원문 정리 + 워커 설계**를 한 곳에 담았다. 원문은 그대로 옮기고,
@@ -577,7 +577,7 @@ router.run()  ┬─ read_state()   실 상태    LLM 1회  ← 추가
 
 ## 9. 서버에 알릴 것 — **규격 변경 없음.** 동작 확인 2건 + 통보 1건 + 제안 1건
 
-> 📄 **전달 문서는 `docs/server-handoff-v5.md` 다.** 서버 담당자가 그것만 읽으면 되도록
+> 📄 **전달 문서는 `docs/server-handoff.md` 다.** 서버 담당자가 그것만 읽으면 되도록
 > 자체 완결로 썼다. 이 장은 **왜 그렇게 정했는지**를 남기는 자리다.
 
 **`emotionAnalyses` 로 충분하다.** 새 `resultType` 도, 새 배열도, **필수 필드 추가도 없다.**

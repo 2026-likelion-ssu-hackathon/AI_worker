@@ -7,13 +7,16 @@
 | --- | --- |
 | [`CLAUDE.md`](CLAUDE.md) | 프로젝트 상시 맥락 |
 | [`docs/contract-v1.md`](docs/contract-v1.md) | 백엔드 연동 규격 (팀 합의 사항) |
-| [`docs/contract-review.md`](docs/contract-review.md) | 규격서에 대한 워커 답변 + 확인 요청 |
-| [`docs/spec-v2.md`](docs/spec-v2.md) | PM 기능 명세 3종 |
+| [`docs/spec-v2.md`](docs/spec-v2.md) | PM 기능 명세 3종 (위젯 ②번 줄) |
 | [`docs/segmentation-v3.md`](docs/segmentation-v3.md) | 대화 분절 설계 + 실측 근거 |
 | [`docs/state-display-v4.md`](docs/state-display-v4.md) | 실 상태 표현 — 위젯 ①번 줄 설계 + 프론트 연동 |
-| [`docs/server-handoff-v5.md`](docs/server-handoff-v5.md) | 서버 담당자 전달 문서 (실 상태 표현) |
 | [`docs/eval-dataset-v1.md`](docs/eval-dataset-v1.md) | 기억/RAG 평가셋 전처리 |
+| [`docs/server-handoff.md`](docs/server-handoff.md) | **서버 담당자 전달본** (실 상태 표현) |
+| [`docs/contract-review.md`](docs/contract-review.md) | **서버 담당자 전달본** (규격서 답변 + 요청) |
 | [`docs/worker-tasks.md`](docs/worker-tasks.md) | 작업 지시 / 진행 상황 |
+
+**버전은 명세·설계에만 붙인다** (`-v<n>`). 다른 팀에 그대로 보내는 전달본과 상시 갱신되는
+운영 문서에는 안 붙인다 — 받는 쪽이 "몇 번이 최신이지"를 고민하게 만들지 않기 위해서다.
 
 이 문서는 **코드가 어떻게 생겼는지**만 설명한다.
 
