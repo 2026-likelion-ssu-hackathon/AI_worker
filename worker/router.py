@@ -83,6 +83,9 @@ class Trace:
     def __init__(self) -> None:
         self.fired: list[str] = []
         self.skipped: list[tuple[str, str]] = []  # (후보, 이유)
+        # 결과는 내보내되 눈에 띄게 남길 것. **판정을 바꾸지 않는다** —
+        # 재생성해도 안 고쳐지는 종류라 지연만 쓰기 때문이다 (`date_course.question_quote`).
+        self.warnings: list[tuple[str, str]] = []
         # 대화 분절
         self.segments: list[Segment] = []
         self.scores: list[SegmentScore] = []  # 발화별 연속성 점수 (왜 잘렸는지)
@@ -107,6 +110,9 @@ class Trace:
 
     def skip(self, name: str, reason: str) -> None:
         self.skipped.append((name, reason))
+
+    def warn(self, name: str, note: str) -> None:
+        self.warnings.append((name, note))
 
 
 @dataclass
@@ -281,6 +287,11 @@ class DateCandidate:
         # 글자 수만 넘은 것이면 문구 생성(`write_reason`)만 다시 돈다.
         # 카카오 검색과 계획은 이미 확정이라 다시 부르지 않는다.
         result = _fit(ctx, self.name, result, _make)
+
+        # 인용에 묻는 말이 남았으면 트레이스에만 남긴다 (재생성하지 않는 이유는 검출기 주석).
+        reason_text = result.result_data.recommendation_reason  # type: ignore[union-attr]
+        if (asked := date_course.question_quote(reason_text)) is not None:
+            ctx.trace.warn(self.name, f"인용에 묻는 말이 남음 — '{asked}'")
 
         # 근거로 삼은 기억을 소모 처리한다. 같은 소재가 매번 다시 나오지 않게 한다.
         if memories:

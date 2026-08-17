@@ -122,6 +122,8 @@ def _trace_json(trace: Trace) -> dict:
     return {
         "fired": list(trace.fired),
         "skipped": [{"candidate": name, "reason": reason} for name, reason in trace.skipped],
+        # 결과는 나갔지만 규칙이 어긋난 것. 판정을 바꾸지 않는다.
+        "warnings": [{"candidate": name, "note": note} for name, note in trace.warnings],
         "segments": _segments_json(trace),
         # 발화별 연속성 점수 + 판정 임계값. 왜 잘렸는지가 화면에서 보이게 한다.
         "scores": _jsonable(trace.scores),

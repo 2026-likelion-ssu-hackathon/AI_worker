@@ -968,6 +968,12 @@ function renderOut() {
   html += metricsHtml(state.run);
   html += segmentsHtml(state.run.trace || {});
 
+  const warnings = state.run.trace?.warnings || [];
+  if (warnings.length) {
+    html += `<div class="skips">${warnings.map((w) =>
+      `<div>⚠ ${esc(CAND_LABEL[w.candidate] || w.candidate)} — ${esc(w.note)}</div>`).join("")}</div>`;
+  }
+
   const skipped = state.run.trace?.skipped || [];
   if (skipped.length) {
     html += `<div class="skips">${skipped.map((s) =>

@@ -188,6 +188,8 @@ def show(path: Path, response: AnalysisResponse, trace: Trace, verbose: bool) ->
     # 왜 안 나갔는지는 시연 중 질문이 가장 많이 나오는 지점이다. verbose 없이도 보여준다.
     for name, reason in trace.skipped:
         print(f"  {DIM}· {CANDIDATE_LABEL.get(name, name)} — {reason}{OFF}")
+    for name, note in trace.warnings:
+        print(f"  ⚠ {CANDIDATE_LABEL.get(name, name)} — {note}")
 
 
 def main(argv: list[str] | None = None) -> int:

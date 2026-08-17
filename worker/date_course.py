@@ -334,6 +334,27 @@ def build_course(plan: DatePlanLLMOutput, region: str | None) -> list[KakaoPlace
     return course
 
 
+# 근거 문구에 **묻는 말이 그대로 남았는가** — `date_reason.md` 6번 규칙의 자동 점검.
+#
+# `성수 쪽은 어때?` 를 그대로 인용하면 "성수 쪽은 어때라고 하신 말" 이 화면에 나간다.
+# 실제로 나왔던 출력이라 회귀를 잡으려고 둔다.
+#
+# ⚠️ **걸려도 재생성하지 않는다.** 원인이 `write_reason` 이 아니라 그 앞의 `reason_seed`
+# 라서, 같은 seed 로 다시 돌리면 또 걸린다 — 실측에서 6번 중 5번 재현됐다. 2초를 쓰고
+# 고쳐지지 않는다. 고칠 자리는 `date_plan.md` 의 reason_seed 규칙이다 (거기서 잡았다).
+# 여기서는 트레이스에 남겨 다음에 규칙이 무너지면 눈에 띄게만 한다.
+_ASK_QUOTE = re.compile(
+    r"(\?|(어때|어떨까|어떠|갈까|할까|먹을까|뭐\s*먹지|뭐\s*하지|뭐\s*할까|어디\s*갈)"
+    r"\s*(라고|라는|고|이라고)?\s*(하[신셨]|했다|한다는|말)?)"
+)
+
+
+def question_quote(text: str) -> str | None:
+    """근거 문구에 남은 묻는 말. 없으면 None."""
+    hit = _ASK_QUOTE.search(text)
+    return hit.group(0).strip() if hit else None
+
+
 def write_reason(
     messages: list[Message],
     memories: list[Memory],
