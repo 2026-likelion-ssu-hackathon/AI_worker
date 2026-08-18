@@ -304,6 +304,24 @@ class DateCandidate:
             return None
 
         region = None if plan.region.strip().lower() in ("", "none") else plan.region.strip()
+
+        # **지역을 못 잡으면 발동하지 않는다.**
+        #
+        # `date_plan.md` 에 이미 "지역을 전혀 알 수 없고 기억에도 장소 단서가 없다 → false"
+        # 라고 적혀 있지만 **LLM 이 안 지킨다.** 실측에서 `region=none` 인 채로
+        # `should_recommend=True` 가 나왔고, 지역이 없으니 카카오가 전국 1위를 물어와
+        # **서울 중구 / 충남 천안**이 코스로 나갔다 ("주말에 뭐 할까 / 영화나 볼까" 대화).
+        #
+        # 코스 안에서 동선은 이어진다(첫 장소를 앵커로 삼는다). **문제는 그 동선이 커플과
+        # 아무 상관이 없다는 것이다.** 어디 사는지 모르는 사람에게 천안 빵집을 제안하면
+        # 추천이 아니라 오작동으로 읽힌다.
+        #
+        # 프롬프트로 안 되는 것을 코드가 막는 자리다 — 자리별 카테고리 강제(`SLOTS`),
+        # 화면 자수 한도(`limits.py`)와 같은 패턴이다. **애매하면 개입하지 않는다.**
+        if region is None:
+            ctx.trace.skip(self.name, "지역 단서 없음 — 아무 데나 추천하지 않는다")
+            return None
+
         course = date_course.build_course(plan, region)
 
         # 최근에 이미 추천한 장소는 뺀다. 같은 커플에게 매번 같은 코스를 주지 않는다.
