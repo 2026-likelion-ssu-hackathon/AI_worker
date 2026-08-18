@@ -150,6 +150,7 @@ def _log_outcome(
     error_code: str | None = None,
     result_types: list[str] | None = None,
     state_count: int = 0,
+    skipped: list[tuple[str, str]] | None = None,
 ) -> None:
     """요청 하나의 결과를 한 줄로 남긴다.
 
@@ -165,6 +166,11 @@ def _log_outcome(
     tail = f"오류={error_code}" if error_code else (
         f"결과={','.join(result_types) if result_types else '없음'} 상태표현={state_count}건"
     )
+    # 미발동 사유도 같이 남긴다. "결과=없음" 만으로는 쿨다운·말투 보류·게이트 미통과가
+    # 구분되지 않아서, 프론트가 "안 뜬다"고 할 때 배포 로그만으로 원인을 좁힐 수 없었다.
+    # 단, 쿼터 소진은 여기에도 안 남는다 — 검색이 0건으로 돌아올 뿐이다 (demo-checklist 6장).
+    if skipped:
+        tail += " · 보류=" + "; ".join(f"{name}:{reason}" for name, reason in skipped)
     logging.getLogger("uvicorn.error").info(
         "분석 %s · %.1f초 · %s · %s", request_id or "(id 없음)", seconds, status, tail
     )
@@ -187,7 +193,7 @@ async def chat_analyses(request: AnalysisRequest) -> JSONResponse:
     started = time.perf_counter()
 
     try:
-        response, _trace = await asyncio.wait_for(
+        response, trace = await asyncio.wait_for(
             run_in_threadpool(analyze, payload, PERSIST),
             timeout=ANALYSIS_DEADLINE,
         )
@@ -207,6 +213,7 @@ async def chat_analyses(request: AnalysisRequest) -> JSONResponse:
         response.error_code,
         [r.result_type for r in response.results],
         len(response.emotion_analyses),
+        trace.skipped,
     )
     return JSONResponse(response.to_json_dict())
 
