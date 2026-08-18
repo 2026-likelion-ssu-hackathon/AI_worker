@@ -14,7 +14,7 @@ Swagger    GET   http://ai-worker.railway.internal:8000/docs
 
 같은 Railway 프로젝트 안의 사설망 주소입니다. **공개 도메인은 만들지 않았습니다.**
 
-연동 규격 자체는 `docs/contract-v1.md`(초안 v1) 기준입니다. 이 문서는 **붙이는 방법 +
+연동 규격 자체는 `docs/contract.md`(초안 v1) 기준입니다. 이 문서는 **붙이는 방법 +
 규격서가 비워둔 칸을 어떻게 채웠는지 + 협의 기록**을 담습니다.
 
 ---
@@ -626,5 +626,5 @@ RESTAURANT  CAFE  CULTURE  ATTRACTION  LODGING  SHOP  ACTIVITY  ETC
 
 ---
 
-설계 근거와 판정 로직 전문은 `docs/state-display-v4.md`(실 상태 표현) ·
-`docs/segmentation-v3.md`(대화 분절) · `docs/spec-v2.md`(기능 명세 3종)에 있습니다.
+설계 근거와 판정 로직 전문은 `docs/design.md` 2부(실 상태 표현) ·
+`docs/design.md` 1부(대화 분절) · `docs/spec.md`(기능 명세 3종)에 있습니다.

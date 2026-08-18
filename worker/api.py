@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="kakapo AI Worker",
-    description="커플 대화 분석 워커. 연동 규격은 `docs/contract-v1.md`.",
+    description="커플 대화 분석 워커. 연동 규격은 `docs/contract.md`.",
     version="1.0.0",
     lifespan=lifespan,
 )

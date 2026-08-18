@@ -116,7 +116,7 @@ def check_date_gate(messages: list[Message]) -> DateGateResult:
 
     **활성 세그먼트를 받는다.** 예전에는 최근 12개를 스스로 잘랐는데, 그 12개 안에 몇 개의
     화제가 들어 있는지 알 수 없어서 두 시간 전에 끝난 데이트 얘기가 지금 싸우는 요청에서
-    코스를 발동시켰다 (`docs/segmentation-v3.md` 1장). 범위는 이제 분절이 정한다.
+    코스를 발동시켰다 (`docs/design.md` 1부 1장). 범위는 이제 분절이 정한다.
     """
     if not messages:
         return DateGateResult(triggered=False)

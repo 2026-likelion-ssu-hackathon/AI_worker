@@ -5,11 +5,11 @@
 
 > 위젯은 **두 줄**이다. 여기서 모으는 `results` 는 ②번 줄이고, 미발동이면 그냥 빈다.
 > ①번 줄(실 상태 표현)은 후보가 아니라 상시라서 `read_state()` 가 따로 처리하고
-> `emotionAnalyses` 로 나간다 (`docs/state-display-v4.md`).
+> `emotionAnalyses` 로 나간다 (`docs/design.md` 2부).
 
 **후보들은 전체 스트림이 아니라 활성 세그먼트(`ctx.active`)만 본다.**
 개입은 지금 벌어지고 있는 대화에 대해서 하는 것이다 — 두 시간 전에 끝난 화제에 지금
-카드를 띄우는 건 늦은 게 아니라 틀린 것이다 (`docs/segmentation-v3.md` 5장).
+카드를 띄우는 건 늦은 게 아니라 틀린 것이다 (`docs/design.md` 1부 5장).
 
 맥락과 트리거를 갈라 쓴다:
 
@@ -372,7 +372,7 @@ class DateCandidate:
 # --------------------------------------------------------------------------
 class YoutubeCandidate:
     """명세의 두 갈래를 모두 태운다 — **관계 고민 신호 또는 공통 관심 주제**
-    (`docs/spec-v2.md` 3장).
+    (`docs/spec.md` 3장).
 
         ① 고민 갈래   싸우고 서먹할 때. 노출 범위를 LLM 이 정한다 (개별/공통)
         ② 화제 갈래   평범한 일상 대화에서 화제가 뚜렷할 때. 항상 COUPLE
@@ -543,7 +543,7 @@ CANDIDATES: list[Candidate] = [ToneCandidate(), DateCandidate(), YoutubeCandidat
 def split(ctx: Context) -> None:
     """스트림을 화제 단위로 끊는다. 모든 것보다 **먼저** 돈다.
 
-    이후 단계가 보는 범위가 여기서 정해진다. 설계는 `docs/segmentation-v3.md`.
+    이후 단계가 보는 범위가 여기서 정해진다. 설계는 `docs/design.md` 1부.
     """
     result = segment(ctx.messages)
     ctx.segments = result.segments
@@ -557,7 +557,7 @@ def read_state(ctx: Context) -> list[EmotionAnalysis]:
 
     후보 기능이 아니라서 `CANDIDATES` 에 넣지 않는다. `route()` 는 "발동한 것을 모으는"
     함수인데 이건 발동 여부가 없다. 결과도 `results` 가 아니라 `emotionAnalyses` 로 나간다
-    (`docs/state-display-v4.md` 5장).
+    (`docs/design.md` 2부 5장).
 
     **`ctx.context` 를 본다.** 활성 세그먼트만 보면 "쌓임 → 풀어짐" 추이를 볼 수 없다 —
     최소 두 시점이 필요하다. 말투 판정이 같은 이유로 쓰는 범위를 그대로 쓴다.

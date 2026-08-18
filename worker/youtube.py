@@ -54,7 +54,7 @@ _CONCERN_RE = re.compile(
 def check_concern_gate(messages: list[Message]) -> list[int]:
     """고민 신호가 있는 메시지 id. 없으면 빈 목록 → LLM 을 부르지 않는다.
 
-    **활성 세그먼트를 받는다.** 범위는 분절이 정한다 (`docs/segmentation-v3.md` 7장).
+    **활성 세그먼트를 받는다.** 범위는 분절이 정한다 (`docs/design.md` 1부 7장).
     """
     if not messages:
         return []

@@ -1,6 +1,6 @@
 """Pydantic 스키마 — **백엔드 연동 공통 규격 v1 기준**.
 
-규격서(`docs/contract-v1.md`)의 요청·응답 구조를 그대로 모델로 옮겼다.
+규격서(`docs/contract.md`)의 요청·응답 구조를 그대로 모델로 옮겼다.
 `model_dump(by_alias=True, exclude_none=True)` 하면 규격서 JSON 이 그대로 나온다.
 
 - 필드명은 파이썬 쪽에서 snake_case, 직렬화할 때 camelCase (규격서 14장)
@@ -39,7 +39,7 @@ VisibilityType = Literal["INDIVIDUAL", "COUPLE"]
 ContentType = Literal["TEXT", "LINK", "MIXED"]
 Status = Literal["COMPLETED", "SKIPPED", "FAILED"]
 
-# 실 상태 표현의 상태 라벨 (`docs/state-display-v4.md` 6장, 디자인 확정 5종).
+# 실 상태 표현의 상태 라벨 (`docs/design.md` 2부 6장, 디자인 확정 5종).
 #
 # **규격서 11장 `emotionType` 에 이 값을 넣는다.** 필드 이름은 감정인데 값은 상태 라벨이다 —
 # 디자인 확정안의 축이 이쪽이고 실 모양·글로우와 1:1 이라 프론트가 그대로 쓴다.
@@ -250,7 +250,7 @@ class AiResult(Camel):
 
 
 class EmotionAnalysis(Camel):
-    """감정 분석 = **실 상태 표현** (규격서 11장 · `docs/state-display-v4.md`).
+    """감정 분석 = **실 상태 표현** (규격서 11장 · `docs/design.md` 2부).
 
     위젯 ①번 줄(상시)이 이 배열이고, ②번 줄(3종 개입)이 `results` 다.
     **화면이 두 줄이라 배열도 두 개다.** 서로 밀어내지 않는다.
@@ -287,7 +287,7 @@ class AnalysisResponse(Camel):
 
 
 # --------------------------------------------------------------------------
-# 대화 분절 (`docs/segmentation-v3.md`)
+# 대화 분절 (`docs/design.md` 1부)
 # --------------------------------------------------------------------------
 # 발화 하나가 직전까지의 맥락과 얼마나 이어지는가.
 #
@@ -490,7 +490,7 @@ class ConcernLLMOutput(BaseModel):
 # 제목·썸네일만으로 고르지 않는다. 댓글이 "영상이 실제로 무엇을 말하는지"를 알려준다.
 # 침묵이 기본값이라는 지시는 `prompts/yt_pick.md` 에도 있다.
 # 유튜브 추천의 **두 번째 갈래** — 명세 "관계 고민 신호 **또는 공통 관심 주제**"
-# (`docs/spec-v2.md` 3장). 고민 갈래만 먼저 구현했다가 나머지 절반을 채운 것이다.
+# (`docs/spec.md` 3장). 고민 갈래만 먼저 구현했다가 나머지 절반을 채운 것이다.
 #
 # 고민 갈래와 **스키마도 프롬프트도 따로 둔다.** 한 프롬프트에 둘을 섞으면 고민 판정이
 # 흐려진다 — 이 레포에서 이미 겪은 실패다(조건부로 일을 줄여주면 모델이 쉬운 쪽으로 쏠린다).
@@ -530,7 +530,7 @@ class VideoPickLLMOutput(BaseModel):
 # (다투는 중)에서 모델이 둘 중 하나를 임의로 골랐고, 점수가 없으니 왜 그쪽인지 알 수도
 # 조정할 수도 없었다 — `case11_mixed` 에서 말투 교정은 공격 표현으로 잡은 발화를 상태
 # 산출은 서운함으로 읽었다. **분절이 경계를 LLM 밖으로 뺀 이유와 같다**
-# (`docs/state-display-v4.md` 6장). 명세의 산출 흐름과도 이쪽이 맞는다 —
+# (`docs/design.md` 2부 6장). 명세의 산출 흐름과도 이쪽이 맞는다 —
 # "감정 수치 스코어링(예: Sadness 3점) → 상태 라벨 매핑".
 #
 # ⚠️ **평온(`STABLE`)에 해당하는 축은 없다.** 처음에는 `calm` 을 두었는데 모델이 그걸

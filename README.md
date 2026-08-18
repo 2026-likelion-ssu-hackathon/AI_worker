@@ -6,11 +6,9 @@
 | 문서 | 내용 |
 | --- | --- |
 | [`CLAUDE.md`](CLAUDE.md) | 프로젝트 상시 맥락 |
-| [`docs/contract-v1.md`](docs/contract-v1.md) | 백엔드 연동 규격 (팀 합의 사항) |
-| [`docs/spec-v2.md`](docs/spec-v2.md) | PM 기능 명세 3종 (위젯 ②번 줄) |
-| [`docs/segmentation-v3.md`](docs/segmentation-v3.md) | 대화 분절 설계 + 실측 근거 |
-| [`docs/state-display-v4.md`](docs/state-display-v4.md) | 실 상태 표현 — 위젯 ①번 줄 설계 + 프론트 연동 |
-| [`docs/eval-dataset-v1.md`](docs/eval-dataset-v1.md) | 기억/RAG 평가셋 전처리 |
+| [`docs/contract.md`](docs/contract.md) | 백엔드 연동 규격 (팀 합의 사항) |
+| [`docs/spec.md`](docs/spec.md) | PM 기능 명세 3종 (위젯 ②번 줄) |
+| [`docs/design.md`](docs/design.md) | 설계 3부 — 대화 분절 · 실 상태 표현 · 기억/RAG 평가셋 |
 | [`docs/server-handoff.md`](docs/server-handoff.md) | **서버 담당자 전달본** — 연동·필드 정의·협의 기록 |
 | [`docs/worker-tasks.md`](docs/worker-tasks.md) | 작업 지시 / 진행 상황 |
 
@@ -195,7 +193,7 @@ AnalysisResponse          COMPLETED / SKIPPED / FAILED
 
 **두 줄은 자리를 다투지 않는다.** 3종이 전부 미발동이어도 ②만 비고 ①은 남는다.
 그래서 ②의 빈 줄은 정상 상태고, ①의 빈 줄은 사고다.
-설계는 `docs/state-display-v4.md`.
+설계는 `docs/design.md` 2부.
 
 ### LLM 과 외부 API 의 역할 분담 — 이 설계의 핵심
 
@@ -268,7 +266,7 @@ LLM 은 **점수와 참/거짓만** 낸다 — 근거 문구를 받지 않는다
 점수가 빠지거나 엉뚱한 id 가 섞여도 **아는 id 만 쓰고 나머지는 "안 자름"으로 넘어간다.**
 호출 자체가 실패했을 때만 조각 전체를 세그먼트 1개로 폴백한다(= 분절 전 동작). `active_context()` 는 말투 판정용 맥락을 4개까지 앞에서 채운다.
 **경계 신호로 쓸 수 있는 룰은 시간 공백 하나뿐이다** — 표지어·어휘 겹침·임베딩 거리를 전부
-실측했고 셋 다 무너졌다(`docs/segmentation-v3.md` 5장). 룰을 추가하려면 먼저 재볼 것.
+실측했고 셋 다 무너졌다(`docs/design.md` 1부 5장). 룰을 추가하려면 먼저 재볼 것.
 
 **`router.py`** — 후보는 `build(ctx) -> AiResult | None` 만 구현하면 되고, `CANDIDATES` 리스트가
 우선순위다. `YOUTUBE_COOLDOWN_MIN`(기본 30분)이 최근에 영상을 낸 요청을 게이트 전에 끊고,
