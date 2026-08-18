@@ -114,6 +114,32 @@ def pick_label(scores: EmotionScores) -> tuple[StateLabel, float]:
     winner = next(axis for axis in PRIORITY if axes[axis] == top)
     return LABEL_BY_AXIS[winner], float(top)
 
+# --------------------------------------------------------------------------
+# 애정 표현 룰 — 명시적 애정 낱말이 있으면 애정 축의 바닥값을 보장한다
+# --------------------------------------------------------------------------
+# "사랑해"라고 말했는데 STABLE 이 뜨는 것을 막는다 (2026-08-19 연동 실측).
+# 짧은 애정 발화는 LLM 이 애정을 2 이하로 깔 때가 있어 MIN_SCORE 에 걸려 평온이 됐다.
+#
+# **바닥값이지 강제 라벨이 아니다.** affection 을 MIN_SCORE 까지만 올리고 판정은
+# 그대로 `pick_label()` 이 한다 — 분노가 ANGER_WINS 이상이면 여전히 ESCALATED 다.
+# "사랑 같은 소리 하네"처럼 애정 낱말이 반어로 쓰인 발화는 분노 점수가 막는다.
+# 라벨을 직접 찍으면 그 방어가 통째로 사라진다.
+#
+# 부분 문자열이라 "사랑해/사랑해요/사랑스러워", "보고싶다/보고싶었어"를 다 잡는다.
+# "사랑니"는 애정이 아니라서 지우고 본다. "영화 보고싶어"(콘텐츠)는 못 가른다 —
+# 알려진 한계인데, 틀려도 긍정 방향(다정)이라 없던 갈등을 만들지는 않는다.
+AFFECTION_WORDS = ("사랑", "보고싶", "보고 싶")
+
+# 화자의 **직전 발화 몇 개**까지 볼지. 창 전체를 보면 대화 초반의 "사랑해" 하나가
+# 창에서 밀려날 때까지 계속 바닥값을 만든다 — 상태는 지금을 보여주는 자리다.
+AFFECTION_RECENT = 3
+
+
+def has_affection_words(text: str) -> bool:
+    cleaned = text.replace("사랑니", "")
+    return any(w in cleaned for w in AFFECTION_WORDS)
+
+
 # 상태 문구의 유효 기간.
 #
 # **새로 정한 값이 아니다.** `segment.GAP_HARD` 를 그대로 쓴다 — 분절이 이미 "3시간 이상
@@ -169,20 +195,38 @@ def read_state(
         if viewer is None:
             continue
 
-        own_ids = [m.message_id for m in messages if m.sender == subject]
+        own = [m for m in messages if m.sender == subject]
+        own_ids = [m.message_id for m in own]
         state = scored.get(subject)
+        # 애정 낱말은 직전 발화만 본다 (상수 주석 참조).
+        hinted = any(has_affection_words(m.content) for m in own[-AFFECTION_RECENT:])
 
         if not own_ids:
             # 이 사람의 발화가 활성 맥락에 없다 → 판단할 근거가 없다.
             # 문구를 지어내지 않고 갱신도 하지 않는다. 화면은 직전 값을 유지한다.
             label, intensity, should_show = NEUTRAL, 0.0, False
-        elif state is None or not state.confident:
-            # 신호가 약하다 → 중립을 **띄운다**. 갱신은 한다.
-            # 여기서 갱신을 멈추면 다툼이 끝난 뒤에도 직전의 격한 문구가 계속 남는다.
+        elif state is None:
+            # LLM 이 이 화자를 채점하지 않았다 → 애정 룰도 안 태운다.
+            # 분노 점수가 없으면 반어("사랑 같은 소리 하네")를 막을 가드가 없다.
             label, intensity, should_show = NEUTRAL, 0.0, True
         else:
-            label, intensity = pick_label(state)
-            should_show = True
+            if hinted and state.affection < MIN_SCORE:
+                # 명시적 애정 낱말 → 바닥값 보정. 트레이스에도 보정 뒤 값이 남게
+                # `scored` 를 갈아 끼운다 — 원점수만 남으면 라벨과 안 맞아 헤맨다.
+                state = state.model_copy(update={
+                    "affection": MIN_SCORE,
+                    "note": f"{state.note} · 룰: 애정 낱말 → affection 바닥값 {MIN_SCORE}",
+                })
+                scored[subject] = state
+            if not state.confident and not hinted:
+                # 신호가 약하다 → 중립을 **띄운다**. 갱신은 한다.
+                # 여기서 갱신을 멈추면 다툼이 끝난 뒤에도 직전의 격한 문구가 계속 남는다.
+                # 애정 낱말이 있으면 예외다 — 낱말 자체가 프롬프트가 요구하는 "문장으로
+                # 짚을 수 있는 근거"라서 confident 를 룰이 대신 채운 것으로 본다.
+                label, intensity, should_show = NEUTRAL, 0.0, True
+            else:
+                label, intensity = pick_label(state)
+                should_show = True
 
         analyses.append(
             EmotionAnalysis(

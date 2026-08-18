@@ -1,0 +1,15 @@
+{
+  "analysisRequestId": "c18a0001-0000-4000-8000-000000000018",
+  "chatRoomId": 1,
+  "participants": [
+    { "participantKey": "USER_A" },
+    { "participantKey": "USER_B" }
+  ],
+  "messages": [
+    { "messageId": 181, "sender": "USER_A", "content": "퇴근했어?", "sentAt": "2026-08-19T20:10:00+09:00" },
+    { "messageId": 182, "sender": "USER_B", "content": "응 방금! 오늘 진짜 피곤하다", "sentAt": "2026-08-19T20:11:00+09:00" },
+    { "messageId": 183, "sender": "USER_A", "content": "고생했어 ㅠㅠ 보고싶어", "sentAt": "2026-08-19T20:12:00+09:00" },
+    { "messageId": 184, "sender": "USER_B", "content": "나도 보고싶어 사랑해", "sentAt": "2026-08-19T20:13:00+09:00" },
+    { "messageId": 185, "sender": "USER_A", "content": "주말에 얼른 보자 사랑해!!", "sentAt": "2026-08-19T20:14:00+09:00" }
+  ]
+}
