@@ -272,7 +272,8 @@ LLM 은 **점수와 참/거짓만** 낸다 — 근거 문구를 받지 않는다
 실측했고 셋 다 무너졌다(`docs/segmentation-v3.md` 5장). 룰을 추가하려면 먼저 재볼 것.
 
 **`router.py`** — 후보는 `build(ctx) -> AiResult | None` 만 구현하면 되고, `CANDIDATES` 리스트가
-우선순위다. `SUPPRESS_YOUTUBE_WHEN_TONE = True` 가 말투 교정이 뜬 요청에서 유튜브를 건너뛴다
+우선순위다. `YOUTUBE_COOLDOWN_MIN`(기본 30분)이 최근에 영상을 낸 요청을 게이트 전에 끊고,
+`SUPPRESS_YOUTUBE_WHEN_TONE = True` 가 말투 교정이 뜬 요청에서 유튜브를 건너뛴다
 (호출 자체를 안 만든다 — 쿼터가 하루 95회다). `split()` 이 맨 먼저 돌아 이후 단계가 볼 범위를
 정하고, `harvest_memories()` 가 데이트보다 **먼저** 돌아서 방금 한 발화가 같은 요청의 데이트
 코스에 반영된다.
@@ -429,6 +430,8 @@ LLM 이 시간대를 판단할 수 있다 — 데이트 코스가 "밤 10시에 
 규격서 13장 기준 검색 실패는 오류가 아니라 기능 미발동이다.
 
 쿼터: `search.list` 가 호출당 100 units, 하루 10,000. 추천 1건에 약 105 units → **하루 약 95회.**
+메시지 1건마다 워커가 불리므로 `router.YOUTUBE_COOLDOWN_MIN`(기본 30분)이 반복 발동을 끊는다 —
+근거는 서버가 주는 `recentResults[].createdAt` 이고, 없으면 억제도 안 걸린다.
 
 ### 프롬프트 (`worker/prompts/*.md`)
 

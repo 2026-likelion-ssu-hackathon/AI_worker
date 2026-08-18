@@ -309,6 +309,7 @@ http://ai-worker.railway.internal:8000/internal/v1/chat-analyses
 | `PORT` | 선택 | 8000 |
 | `KAKAPO_DEADLINE` | 선택 | 25 (초) |
 | `KAKAPO_PERSIST` | 선택 | 1. `0` 이면 추출한 기억을 파일에 쓰지 않습니다 |
+| `KAKAPO_YOUTUBE_COOLDOWN_MIN` | 선택 | 30 (분). 최근에 영상을 낸 뒤 이 시간 안에는 유튜브 추천이 발동하지 않습니다 |
 
 ---
 

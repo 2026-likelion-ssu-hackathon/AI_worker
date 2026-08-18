@@ -131,6 +131,18 @@ class RecentResult(Camel):
     reference_key: str
     created_at: datetime | None = None
 
+    @field_validator("created_at")
+    @classmethod
+    def _kst(cls, v: datetime | None) -> datetime | None:
+        """오프셋 없는 시각은 KST 로 본다.
+
+        **`Message.sentAt` 과 같은 이유인데 여기는 터지는 방식이 다르다.** 이 값은
+        `ctx.now`(타임존 인식)와 **빼기**를 한다 (`Context.minutes_since`). 규격서 예시가
+        `"2026-08-14T21:00:00"` 처럼 오프셋 없이 오므로, 정규화하지 않으면 그 뺄셈이
+        `TypeError` 로 터지고 요청 전체가 `MODEL_ERROR` 가 된다.
+        """
+        return as_kst(v) if v is not None else None
+
 
 class SpeakerProfileInput(Camel):
     """서버가 집계해 실어주는 화자별 평소 말투 기준선 (2026-08-17 합의 — 우선 목데이터).
