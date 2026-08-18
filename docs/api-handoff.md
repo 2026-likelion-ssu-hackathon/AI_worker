@@ -3,6 +3,13 @@
 요청 주신 구성 그대로 만들었습니다. **아래 JSON 은 전부 실제로 서버를 띄우고 받은 응답**이고,
 손으로 쓴 예시가 아닙니다.
 
+```
+분석 요청  POST  http://ai-worker.railway.internal:8000/internal/v1/chat-analyses
+헬스체크   GET   http://ai-worker.railway.internal:8000/health
+```
+
+같은 Railway 프로젝트 안의 사설망 주소입니다. **공개 도메인은 만들지 않았습니다.**
+
 연동 규격 자체는 `docs/contract-v1.md`(초안 v1) 기준이고, 규격에 대한 답변은
 `docs/contract-review.md` 에 있습니다. 이 문서는 **붙이는 방법**만 다룹니다.
 
@@ -84,8 +91,11 @@ uvicorn 에 넘깁니다. `127.0.0.1` 도 `[::1]` 도 같은 서버에 닿습니
 호출은 이렇게 하시면 됩니다.
 
 ```
-http://<서비스이름>.railway.internal:<PORT>/internal/v1/chat-analyses
+http://ai-worker.railway.internal:8000/internal/v1/chat-analyses
 ```
+
+**IPv6 로 해석되는 주소입니다.** 자바 쪽에서 IPv4 를 강제하는 옵션
+(`-Djava.net.preferIPv4Stack=true`)이 켜져 있으면 이 호스트를 못 찾습니다.
 
 ---
 
@@ -308,7 +318,7 @@ http://<서비스이름>.railway.internal:<PORT>/internal/v1/chat-analyses
 | --- | --- | --- |
 | 🔴 | **`results: []` + `COMPLETED` 를 정상으로 처리** | 가장 흔한 응답입니다. 개입 없는 대화가 오류로 잡힙니다 |
 | 🔴 | **`emotionAnalyses` 를 `viewerParticipant` 로 갈라서 전송** | A 화면에 B 것이 뜹니다 (`docs/server-handoff.md`) |
-| 🟢 | 호출 주소·포트 (`*.railway.internal:<PORT>`) | — |
+| 🟢 | 호출 주소 `http://ai-worker.railway.internal:8000` 로 붙는지 | — |
 | 🟢 | 오류 시 HTTP 200 유지할지, 4xx 로 바꿀지 | — |
 
 `emotionAnalyses` 는 **개인화된 배열**입니다. `subjectParticipant` 는 감정의 주인,
