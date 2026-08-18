@@ -166,7 +166,7 @@ class AnalysisRequest(Camel):
     messages: list[Message]
 
     # 규격서 초안 v1 에는 없고 협의로 추가된 필드들. **둘 다 선택이다** —
-    # 서버가 안 보내면 지금까지처럼 시드·폴백으로 동작한다 (`docs/contract-review.md` 1·2번).
+    # 서버가 안 보내면 지금까지처럼 시드·폴백으로 동작한다 (`docs/server-handoff.md` 10장 1·2번).
     recent_results: list[RecentResult] = Field(default_factory=list)
     speaker_profiles: list[SpeakerProfileInput] = Field(default_factory=list)
 

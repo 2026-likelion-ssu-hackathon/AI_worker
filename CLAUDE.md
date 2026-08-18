@@ -38,9 +38,7 @@
 
 | 문서 | 내용 | 받는 사람 |
 | --- | --- | --- |
-| `docs/api-handoff.md` | **HTTP 연동** — 실행 명령·엔드포인트·실제 요청/응답 JSON | 서버 담당자 |
-| `docs/server-handoff.md` | 실 상태 표현 연동 — 필드 정의·확인 체크리스트 | 서버 담당자 |
-| `docs/contract-review.md` | 규격서 v1 답변 + 요청 사항 | 서버 담당자 |
+| `docs/server-handoff.md` | **연동 전부** — 엔드포인트·요청/응답·감정 분석 필드·협의 기록 | 서버 담당자 |
 | `docs/worker-tasks.md` | 작업 지시서 / 진행 상황 | 나 |
 | `docs/demo-checklist.md` | **시연 전 확인 목록** — 코드 프리즈 2026-08-21 10:00 | 나 |
 | `docs/tech-qa.md` | **기술 QA 대비** — 예상 질문·즉답 숫자·약점 | 나 |
@@ -198,7 +196,7 @@ LLM 이 상호명이나 영상 ID 를 만들면 **존재하지 않는 가게와 
 
 **HTTP 서버는 `worker/api.py` 다** (FastAPI, 2026-08-18). `analyze()` 를 그대로 물리고
 **판정 로직을 하나도 갖지 않는다** — CLI(`tools/run.py`)·devui 와 같은 함수를 부른다.
-붙이는 방법은 `docs/api-handoff.md`(서버 담당자 전달본).
+붙이는 방법은 `docs/server-handoff.md`(서버 담당자 전달본).
 
 ```
 POST /internal/v1/chat-analyses   GET /health   GET /docs · /openapi.json
@@ -283,10 +281,10 @@ AI-Worker/
 ├── Dockerfile · railway.json    ← 배포 (Railway). 런타임에 필요한 것만 담는다
 ├── docs/
 │   ├── contract-v1.md           ← 백엔드 연동 규격 (팀 합의)
-│   ├── contract-review.md       ← 규격서 답변 + 확인 요청
-│   ├── api-handoff.md           ← HTTP 연동 전달본 (실행·엔드포인트·요청/응답)
+│   ├── server-handoff.md        ← 서버 전달본 (연동·필드 정의·협의 기록)
 │   ├── spec-v2.md               ← PM 기능 명세 3종
 │   ├── segmentation-v3.md       ← 대화 분절 설계 + 실측 근거
+│   ├── state-display-v4.md      ← 실 상태 표현 설계 (위젯 ①번 줄)
 │   ├── eval-dataset-v1.md       ← 기억/RAG 평가셋 전처리
 │   ├── worker-tasks.md          ← 작업 지시서
 │   ├── demo-checklist.md        ← 시연 전 확인 목록 (코드 프리즈 8/21 10:00)
@@ -682,14 +680,14 @@ A 화면과 B 화면의 ①번 줄 내용이 다르다.
 - 명세와 코드가 어긋나면 **명세가 맞다.** 명세를 바꿔야 한다고 판단되면 코드를 임의로
   고치지 말고 사용자에게 먼저 알린다
 - **서버 연동 규격은 팀 합의 사항이다.** 한쪽만 바꾸면 상대 서버가 깨진다.
-  워커 쪽 의견은 `docs/contract-review.md` 에 적고 협의한다
+  워커 쪽 의견은 `docs/server-handoff.md` 에 적고 협의한다
 - **LLM 에게 실재하는 것의 이름·링크를 만들게 하지 않는다** (장소, 영상, 인용문)
 - **문서 이름에 버전을 붙일지는 "누가 읽는가"로 정한다.**
 
   | | 버전 | 예 |
   | --- | --- | --- |
   | **명세·설계** — 세대가 쌓이고 어느 세대의 결정인지 남겨야 하는 것 | `<주제>-v<n>.md` | `contract-v1` · `spec-v2` · `segmentation-v3` · `state-display-v4` |
-  | **전달본** — 다른 팀에 그대로 보내는 것 | **안 붙인다** | `api-handoff.md` · `server-handoff.md` · `contract-review.md` |
+  | **전달본** — 다른 팀에 그대로 보내는 것 | **안 붙인다** | `server-handoff.md` |
   | **운영 문서** — 상시 갱신되는 것 | 안 붙인다 | `worker-tasks.md` · `README.md` |
 
   명세·설계는 기존 문서를 크게 뜯어고칠 때 덮어쓰지 말고 다음 번호로 새로 만든다.

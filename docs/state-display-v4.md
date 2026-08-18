@@ -7,7 +7,7 @@
 | 코드 | `worker/state.py` · `worker/prompts/state.md` · `worker/copy.py` · `worker/filter.py` |
 | 범위 | 워커 파이프라인. **연동 규격 변경 없음** — 서버 동작 확인 2건 (`contract-v1.md` 11장) |
 | 서버 전달 | `docs/server-handoff.md` |
-| 관련 | `docs/contract-v1.md` 11·12장 · `docs/contract-review.md` · `docs/spec-v2.md` · `CLAUDE.md` 절대 제약 |
+| 관련 | `docs/contract-v1.md` 11·12장 · `docs/server-handoff.md` · `docs/spec-v2.md` · `CLAUDE.md` 절대 제약 |
 
 이 문서는 **PM 명세 원문 정리 + 워커 설계**를 한 곳에 담았다. 원문은 그대로 옮기고,
 판단·해석은 `> 워커 노트` 로 표시했다. 숫자는 실측이면 실측이라고 적었다
@@ -259,7 +259,7 @@ B 화면 상단  "편안해 보여요"      ← subject=USER_A, viewer=USER_B
 
 명세는 **"누적 감정 상태의 변화 추이 (쌓임 → 풀어짐)"** 를 요구한다. 그런데 워커는
 동기 REST 요청마다 상태가 없고, 요청 페이로드에 과거 감정값이 들어오지 않는다.
-`docs/contract-review.md` 의 `recentResults` · `speakerProfiles` 와 **똑같은 문제**다.
+`docs/server-handoff.md` 의 `recentResults` · `speakerProfiles` 와 **똑같은 문제**다.
 
 - **MVP** — 요청에 들어온 스트림 안에서만 추이를 본다. 활성 세그먼트와 그 직전 맥락을
   함께 넣고 "쌓이는 중 / 풀리는 중 / 그대로"를 묻는다. 요청 경계를 넘는 추이는 못 본다
@@ -314,7 +314,7 @@ B 화면 상단  "편안해 보여요"      ← subject=USER_A, viewer=USER_B
 ```
 
 `emotionType` + `intensityValue` 가 명세의 "감정 수치 스코어링(Sadness 3점)"이고,
-`subject`/`viewer` 가 4장①의 대칭 노출이다. **`docs/contract-review.md` 에서 "명세가
+`subject`/`viewer` 가 4장①의 대칭 노출이다. **`docs/server-handoff.md` 에서 "명세가
 아직 없어 `[]` 로 보낸다"고 답한 그 배열이 이 문서로 채워진다.**
 
 ### 모자란 것 — 화면 문구를 실을 자리가 없다
@@ -560,7 +560,7 @@ router.run()  ┬─ read_state()   실 상태    LLM 1회  ← 추가
 
 ### 비용
 
-매 요청 고정 LLM 호출이 2회 → **3회**가 된다. `docs/contract-review.md` 에서 타임아웃
+매 요청 고정 LLM 호출이 2회 → **3회**가 된다. `docs/server-handoff.md` 에서 타임아웃
 30초를 제안하며 정리한 표에 한 줄이 추가되는 셈이다.
 
 **상태 산출은 기억 추출·말투 판정과 동시에 돈다** (`router.run()`). 셋이 서로 결과를 쓰지
@@ -581,7 +581,7 @@ router.run()  ┬─ read_state()   실 상태    LLM 1회  ← 추가
 > 자체 완결로 썼다. 이 장은 **왜 그렇게 정했는지**를 남기는 자리다.
 
 **`emotionAnalyses` 로 충분하다.** 새 `resultType` 도, 새 배열도, **필수 필드 추가도 없다.**
-규격서 11장이 이 기능의 자리를 이미 비워 뒀고, `docs/contract-review.md` 에서 "명세가
+규격서 11장이 이 기능의 자리를 이미 비워 뒀고, `docs/server-handoff.md` 에서 "명세가
 나오면 채우겠다"고 답해 둔 그 자리다. **협의는 사실상 끝나 있다.**
 
 | | 항목 | 성격 |
@@ -667,7 +667,7 @@ router.run()  ┬─ read_state()   실 상태    LLM 1회  ← 추가
 | `worker/router.py` | `read_state(ctx)` 를 `harvest_memories` 와 나란히. `Trace` 에 상태 기록 |
 | `worker/pipeline.py` | `emotion_analyses` 를 채운다. `SKIPPED` 판정 조건 수정 (9장) |
 | `devui/` | A/B 화면을 **2줄**로 (① 감정 상태 / ② 3종). 3종 미발동 시 ②가 비는 것까지 보이게. 단계 계측에 상태 산출 추가 |
-| `docs/contract-review.md` | 값 정의 통보 + `status` 변경 고지 (9장). **규격 변경 요청은 없다** |
+| `docs/server-handoff.md` | 값 정의 통보 + `status` 변경 고지 (9장). **규격 변경 요청은 없다** |
 | `CLAUDE.md` | 아키텍처 도식 · 후보 기능 목록 · 맥락 범위 표에 반영 |
 | `README.md` | 모듈 설명 추가 |
 

@@ -101,7 +101,7 @@ def analyze(payload: dict, persist: bool = True) -> tuple[AnalysisResponse, Trac
     # 실 상태 표현이 상시라서 `states` 가 거의 항상 차고, 따라서 **`SKIPPED` 는 거의
     # 나오지 않는다.** 상태 산출까지 실패했을 때만 남는다.
     # 서버가 `SKIPPED` 를 "아무것도 안 함"으로 보고 전송을 건너뛰면 ①번 줄이 영영 안 뜬다 —
-    # `docs/contract-review.md` 에 고지해 둔 항목이다.
+    # `docs/server-handoff.md` 에 고지해 둔 항목이다.
     if not results and not states:
         return _skipped(request.analysis_request_id), trace
 

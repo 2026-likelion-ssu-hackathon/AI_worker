@@ -11,8 +11,7 @@
 | [`docs/segmentation-v3.md`](docs/segmentation-v3.md) | 대화 분절 설계 + 실측 근거 |
 | [`docs/state-display-v4.md`](docs/state-display-v4.md) | 실 상태 표현 — 위젯 ①번 줄 설계 + 프론트 연동 |
 | [`docs/eval-dataset-v1.md`](docs/eval-dataset-v1.md) | 기억/RAG 평가셋 전처리 |
-| [`docs/server-handoff.md`](docs/server-handoff.md) | **서버 담당자 전달본** (실 상태 표현) |
-| [`docs/contract-review.md`](docs/contract-review.md) | **서버 담당자 전달본** (규격서 답변 + 요청) |
+| [`docs/server-handoff.md`](docs/server-handoff.md) | **서버 담당자 전달본** — 연동·필드 정의·협의 기록 |
 | [`docs/worker-tasks.md`](docs/worker-tasks.md) | 작업 지시 / 진행 상황 |
 
 **버전은 명세·설계에만 붙인다** (`-v<n>`). 다른 팀에 그대로 보내는 전달본과 상시 갱신되는
@@ -53,7 +52,7 @@ cp .env.example .env      # OPENAI_API_KEY 채우기 (나머지는 선택)
 
 ### HTTP 서버로 띄우기 (`worker/api.py`)
 
-채팅 서버가 붙는 진입점이다. 연동 문서는 `docs/api-handoff.md`.
+채팅 서버가 붙는 진입점이다. 연동 문서는 `docs/server-handoff.md`.
 
 ```bash
 .venv/bin/python -m worker.api            # 기본 8000

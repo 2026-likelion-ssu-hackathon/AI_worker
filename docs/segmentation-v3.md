@@ -5,7 +5,7 @@
 | 상태 | **확정 — 구현함.** 2026-08-16 |
 | 코드 | `worker/segment.py` · `worker/prompts/segment.md` · `fixtures/case11_mixed.json` |
 | 범위 | 워커 파이프라인 (서버 규격 변경 없음, 확인 요청 1건) |
-| 관련 | `docs/contract-v1.md` 3·5·7장 · `docs/contract-review.md` 4번 · `CLAUDE.md` |
+| 관련 | `docs/contract-v1.md` 3·5·7장 · `docs/server-handoff.md` 10장 4번 · `CLAUDE.md` |
 
 > 이 문서는 **워커 쪽 설계**다. PM 기능 명세(`spec-v2.md`)도, 팀 합의 규격(`contract-v1.md`)도
 > 아니다. 숫자는 실측이면 실측이라고, 아니면 아니라고 표시했다.
