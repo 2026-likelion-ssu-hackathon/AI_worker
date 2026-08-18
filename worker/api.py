@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import threading
 from contextlib import asynccontextmanager
@@ -57,6 +58,20 @@ PERSIST = os.getenv("KAKAPO_PERSIST", "1") not in {"0", "false", "False"}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 어떤 키가 꽂혀 있는지 기동 로그에 남긴다. **값은 절대 찍지 않는다.**
+    #
+    # 키가 빠져도 워커는 죽지 않고 그 기능만 조용히 미발동한다 — 설계가 그렇다.
+    # 그래서 **배포 상태로는 절대 안 드러나고** 한참 뒤에 "왜 아무것도 안 떠요"로
+    # 나타난다. 배포 로그가 그때 되짚을 수 있는 유일한 흔적이라 여기서 찍는다.
+    log = logging.getLogger("uvicorn.error")
+    log.info(
+        "PORT=%s · 외부 API 키 — openai=%s kakao=%s youtube=%s  (없는 쪽은 해당 기능만 미발동)",
+        os.getenv("PORT", "8000"),
+        bool(os.getenv("OPENAI_API_KEY")),
+        places.available(),
+        ytapi.available(),
+    )
+
     # 기억 인덱스를 미리 만든다. 27건 임베딩에 2.6초가 걸리는데, 안 하면 그게
     # **첫 요청의 데이트 코스 경로 한가운데** 얹힌다. 결과는 바뀌지 않고 시점만 앞당긴다.
     # 실패해도 넘어간다 — 뒤에서 `_get_store()` 가 다시 시도한다.
