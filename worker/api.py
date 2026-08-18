@@ -30,6 +30,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -112,6 +113,15 @@ async def _on_invalid_body(request: Request, exc: RequestValidationError) -> JSO
             request_id = str(body.get("analysisRequestId", "") or "")
     except Exception:  # noqa: BLE001 — 본문이 JSON 이 아닐 수도 있다
         pass
+
+    # **여기도 남긴다.** 이 경로는 `analyze()` 를 타지 않아서 아래 `_log_outcome` 을
+    # 지나가지 않는다. 본문이 규격과 어긋나는 건 연동 초기에 가장 흔한 실패라,
+    # 어느 필드가 걸렸는지가 로그에 없으면 양쪽이 서로를 의심하게 된다.
+    logging.getLogger("uvicorn.error").warning(
+        "분석 %s · FAILED · 오류=INVALID_REQUEST · %s",
+        request_id or "(id 없음)",
+        exc.errors(),
+    )
     return _failed(request_id, "INVALID_REQUEST", str(exc.errors()))
 
 
@@ -133,6 +143,33 @@ def health() -> dict:
     }
 
 
+def _log_outcome(
+    request_id: str,
+    started: float,
+    status: str,
+    error_code: str | None = None,
+    result_types: list[str] | None = None,
+    state_count: int = 0,
+) -> None:
+    """요청 하나의 결과를 한 줄로 남긴다.
+
+    **액세스 로그만으로는 성공·실패를 구분할 수 없다.** 오류도 `FAILED` 봉투에 담아
+    HTTP 200 으로 내보내는 설계라(파일 상단 참조), uvicorn 이 남기는 `200 OK` 는
+    "응답이 나갔다"는 뜻일 뿐이다. 배포 환경에는 `--verbose` 도 devui 도 없어서,
+    이 줄이 없으면 **무엇이 발동했는지 알 방법이 자체가 없다.**
+
+    `analysisRequestId` 를 앞에 두는 이유는 백엔드가 같은 값을 로그에 남기기 때문이다.
+    양쪽 로그를 그 값으로 맞대면 어디서 끊겼는지가 바로 나온다.
+    """
+    seconds = time.perf_counter() - started
+    tail = f"오류={error_code}" if error_code else (
+        f"결과={','.join(result_types) if result_types else '없음'} 상태표현={state_count}건"
+    )
+    logging.getLogger("uvicorn.error").info(
+        "분석 %s · %.1f초 · %s · %s", request_id or "(id 없음)", seconds, status, tail
+    )
+
+
 @app.post(
     "/internal/v1/chat-analyses",
     tags=["analysis"],
@@ -147,6 +184,7 @@ async def chat_analyses(request: AnalysisRequest) -> JSONResponse:
     부르면 이벤트 루프가 통째로 멈춰서 **동시 요청이 직렬화된다.** 스레드풀로 넘긴다.
     """
     payload = request.model_dump(by_alias=True, mode="json")
+    started = time.perf_counter()
 
     try:
         response, _trace = await asyncio.wait_for(
@@ -155,12 +193,21 @@ async def chat_analyses(request: AnalysisRequest) -> JSONResponse:
         )
     except asyncio.TimeoutError:
         # 넘긴 스레드는 계속 돈다 — 파이썬은 스레드를 밖에서 못 죽인다. 응답만 먼저 보낸다.
+        _log_outcome(request.analysis_request_id, started, "FAILED", "ANALYSIS_TIMEOUT")
         return _failed(
             request.analysis_request_id,
             "ANALYSIS_TIMEOUT",
             f"{ANALYSIS_DEADLINE:g}초 안에 분석을 끝내지 못했습니다",
         )
 
+    _log_outcome(
+        response.analysis_request_id,
+        started,
+        response.status,
+        response.error_code,
+        [r.result_type for r in response.results],
+        len(response.emotion_analyses),
+    )
     return JSONResponse(response.to_json_dict())
 
 
