@@ -78,7 +78,7 @@ from worker.ytapi import Video
 # 정책이 바뀌면 이 상수만 False 로 두면 된다.
 SUPPRESS_YOUTUBE_WHEN_TONE = True
 
-# 유튜브를 마지막으로 내보낸 지 이 시간이 안 지났으면 **아예 돌지 않는다** (분).
+# 유튜브 억제 — **같은 화제엔 영상 하나만** + 시간 백스톱 (분).
 #
 # **메시지 1건마다 워커가 한 번 불린다** (2026-08-18 백엔드 확정). 억제가 없으면 같은
 # 화제가 이어지는 동안 메시지마다 검색이 나간다 — 대화 한 번에 쿼터가 통째로 마른다.
@@ -88,14 +88,21 @@ SUPPRESS_YOUTUBE_WHEN_TONE = True
 # 소진되면 **오류가 아니라 조용한 미발동**으로 바뀐다 (`ytapi._get` 이 실패를 삼킨다).
 # 화면에서는 "적절한 영상이 없었다"와 구분되지 않아서, 시연 중이면 원인을 못 찾는다.
 #
-# 30분이면 커플 1쌍당 하루 최대 48회라 상한 안쪽이고, 제품 판단으로도 맞다 —
-# 30분 안에 영상 두 개를 던지는 건 어차피 과하다.
+# 주 억제는 **세그먼트 기준**이다 — 마지막 영상의 `createdAt` 이 활성 세그먼트 시작
+# 뒤면 지금 화제에 이미 답한 것이라 보류한다. 처음엔 30분 고정 쿨다운이었는데 화제를
+# 못 봐서 양쪽으로 틀렸다 — 새 화제엔 30분 안이라도 떠야 하고, 같은 화제엔 30분
+# 지나도 두 번 뜨면 안 된다 (2026-08-19).
+#
+# 시간 백스톱이 남는 이유는 세그먼트 경계가 LLM 산출이라서다 — 요청마다 다시 긋기
+# 때문에 같은 화제 중간에 경계가 흔들리면 그때마다 검색이 나간다. 백스톱이 그 폭주를
+# 분당 상한으로 누른다. 백엔드 `createdAt` 과 메시지 `sentAt` 의 시계가 어긋나
+# 세그먼트 비교가 빗나가는 경우도 같이 받친다.
 #
 # **근거는 서버가 실어주는 `recentResults[].createdAt` 이다.** 워커가 상태를 갖지 않는다는
 # 원칙을 깨지 않는다. 그 필드가 안 오면 억제도 걸리지 않는다 — 지금까지와 같이 동작한다.
 #
-# 시연 리허설을 연달아 돌려야 하면 `KAKAPO_YOUTUBE_COOLDOWN_MIN=0` 으로 끈다.
-YOUTUBE_COOLDOWN_MIN = float(os.getenv("KAKAPO_YOUTUBE_COOLDOWN_MIN", "30"))
+# 시연 리허설을 연달아 돌려야 하면 `KAKAPO_YOUTUBE_COOLDOWN_MIN=0` — 둘 다 꺼진다.
+YOUTUBE_COOLDOWN_MIN = float(os.getenv("KAKAPO_YOUTUBE_COOLDOWN_MIN", "5"))
 
 # 유튜브 **화제 갈래**가 비켜야 하는 데이트 신호.
 #
@@ -160,12 +167,13 @@ class Context:
         """활성 세그먼트의 메시지. 게이트·트리거·RAG·기억 추출이 보는 범위."""
         return self.segments[-1].messages if self.segments else self.messages
 
-    def minutes_since(self, result_type: str) -> float | None:
-        """그 기능이 **마지막으로 나간 지 몇 분 됐는가.** 모르면 None.
+    def last_result_at(self, result_type: str) -> datetime | None:
+        """그 기능이 **마지막으로 나간 시각.** 모르면 None.
 
         `recentResults` 는 지금까지 중복 제거(`recent_keys`)에만 쓰였다. 같은 배열의
-        `createdAt` 을 보면 **얼마나 자주 나가는지**도 알 수 있다 — 워커가 상태를 갖지
-        않고도 빈도를 조절할 수 있는 유일한 근거다.
+        `createdAt` 을 보면 **언제 나갔는지**도 알 수 있다 — 워커가 상태를 갖지
+        않고도 빈도를 조절할 수 있는 유일한 근거다. 세그먼트 시작과 비교하면
+        "지금 화제에 이미 답했는가"가 되고, `now` 와 비교하면 시간 쿨다운이 된다.
 
         `createdAt` 이 없는 항목은 세지 않는다. 선택 필드라 서버가 안 보낼 수 있고,
         **모르는 것을 "오래됐다"로 치면 억제가 통째로 무력화된다.**
@@ -175,12 +183,7 @@ class Context:
             for r in self.request.recent_results
             if r.result_type == result_type and r.created_at is not None
         ]
-        if not stamps:
-            return None
-        # 음수는 0으로 눌러 둔다. 워커의 "지금"은 마지막 메시지 시각인데 `createdAt` 은
-        # 백엔드가 찍은 값이라 **두 시계가 어긋나면 미래로 들어올 수 있다.** 판정은
-        # 어차피 같지만(둘 다 쿨다운 안), 로그에 "-50분 전에 냈다"가 남으면 읽는 사람이 헤맨다.
-        return max(0.0, (self.now - max(stamps)).total_seconds() / 60)
+        return max(stamps) if stamps else None
 
     def recent_keys(self, result_type: str) -> set[str]:
         """최근에 이미 내보낸 결과의 식별자 (규격서 10장 "동일 영상 재추천 방지").
@@ -399,16 +402,26 @@ class YoutubeCandidate:
     name = "youtube"
 
     def build(self, ctx: Context) -> AiResult | None:
-        # **쿨다운을 게이트보다 먼저 본다.** 뒤에 두면 이미 LLM 분류를 부른 뒤라
+        # **억제를 게이트보다 먼저 본다.** 뒤에 두면 이미 LLM 분류를 부른 뒤라
         # 아낀 게 검색 쿼터뿐이다. 여기서 끊으면 LLM 호출까지 같이 준다.
         # 두 갈래에 똑같이 건다 — 쿼터는 갈래를 가리지 않고 한 통에서 나간다.
-        since = ctx.minutes_since("YOUTUBE_RECOMMENDATION")
-        if since is not None and since < YOUTUBE_COOLDOWN_MIN:
-            ctx.trace.skip(
-                self.name,
-                f"{since:.0f}분 전에 영상을 냈다 — 쿨다운 {YOUTUBE_COOLDOWN_MIN:.0f}분",
-            )
-            return None
+        last = ctx.last_result_at("YOUTUBE_RECOMMENDATION")
+        if last is not None and YOUTUBE_COOLDOWN_MIN > 0:
+            # ① 같은 화제엔 하나만 — 마지막 영상이 활성 세그먼트 시작 뒤에 나갔으면
+            #    지금 이어지는 화제에 이미 답한 것이다. 화제가 바뀌면(새 세그먼트) 풀린다.
+            if ctx.active and last >= ctx.active[0].sent_at:
+                ctx.trace.skip(self.name, "이 화제에 이미 영상을 냈다 — 새 화제까지 보류")
+                return None
+            # ② 시간 백스톱 — 세그먼트 경계가 흔들리거나 두 시계가 어긋날 때의 폭주 방지
+            #    (상수 주석 참조). 음수는 0으로 눌러 둔다 — `createdAt` 은 백엔드 시계라
+            #    미래로 들어올 수 있는데, 로그에 "-50분 전"이 남으면 읽는 사람이 헤맨다.
+            since = max(0.0, (ctx.now - last).total_seconds() / 60)
+            if since < YOUTUBE_COOLDOWN_MIN:
+                ctx.trace.skip(
+                    self.name,
+                    f"{since:.0f}분 전에 영상을 냈다 — 백스톱 {YOUTUBE_COOLDOWN_MIN:.0f}분",
+                )
+                return None
 
         concern_ids = youtube.check_concern_gate(ctx.active)
         if concern_ids:
