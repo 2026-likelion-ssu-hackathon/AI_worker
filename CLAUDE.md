@@ -43,6 +43,7 @@
 | `docs/contract-review.md` | 규격서 v1 답변 + 요청 사항 | 서버 담당자 |
 | `docs/worker-tasks.md` | 작업 지시서 / 진행 상황 | 나 |
 | `docs/demo-checklist.md` | **시연 전 확인 목록** — 코드 프리즈 2026-08-21 10:00 | 나 |
+| `docs/tech-qa.md` | **기술 QA 대비** — 예상 질문·즉답 숫자·약점 | 나 |
 | `README.md` | 코드 설명서 | 나 |
 
 프론트(민상) 전달분은 아직 별도 파일이 없다 — `state-display-v4.md` 13장에 있다.
@@ -288,7 +289,8 @@ AI-Worker/
 │   ├── segmentation-v3.md       ← 대화 분절 설계 + 실측 근거
 │   ├── eval-dataset-v1.md       ← 기억/RAG 평가셋 전처리
 │   ├── worker-tasks.md          ← 작업 지시서
-│   └── demo-checklist.md        ← 시연 전 확인 목록 (코드 프리즈 8/21 10:00)
+│   ├── demo-checklist.md        ← 시연 전 확인 목록 (코드 프리즈 8/21 10:00)
+│   └── tech-qa.md               ← 기술 QA 대비 (예상 질문·숫자·약점)
 ├── parked/                      ← 대화 소재 기능 아카이브 (import 되지 않음)
 ├── .env.example
 ├── requirements.txt
