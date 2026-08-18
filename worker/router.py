@@ -66,7 +66,7 @@ from worker.places import KakaoPlace
 from worker.profile import resolve_profile
 from worker.retrieve import mark_used, recent_context, retrieve_many, save_memories
 from worker.segment import active_context, segment
-from worker.tone import check_tone_gate, tone_judge, tone_suggest
+from worker.tone import check_tone_gate, harsh_in, tone_judge, tone_suggest
 from worker.ytapi import Video
 
 # 갈등 중재가 발동한 요청에서는 유튜브 추천을 건너뛴다.
@@ -273,6 +273,18 @@ class ToneCandidate:
             if not is_clean(result):
                 ctx.trace.skip(self.name, f"금지어 필터 — '{banned_in(result)}'")
                 return None
+
+        # 대체 문장에 거친 어휘가 남았으면 1회 재생성.
+        #
+        # **금지어와 달리 버리지 않는다.** 금지어는 절대 제약이지만 이건 품질이고,
+        # 거친 말이 조금 남아도 원문(공격 표현)보다는 낫다. 길이 초과를 잘라서라도
+        # 내보내는 것과 같은 판단이다.
+        if (harsh := harsh_in(result.result_data.alternative_sentence, profile)) is not None:
+            retry = _make()
+            if harsh_in(retry.result_data.alternative_sentence, profile) is None:
+                result = retry
+            else:
+                ctx.trace.warn(self.name, f"대체 문장에 거친 표현이 남음 — '{harsh}'")
 
         return _fit(ctx, self.name, result, _make)
 

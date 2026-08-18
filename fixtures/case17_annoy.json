@@ -1,0 +1,11 @@
+{
+  "analysisRequestId": "bb17bb17-1717-4c17-9717-bb17bb17bb17",
+  "chatRoomId": 1,
+  "participants": [{ "participantKey": "USER_A" }, { "participantKey": "USER_B" }],
+  "messages": [
+    { "messageId": 701, "sender": "USER_A", "content": "오늘 저녁 같이 먹기로 했잖아 나 기다렸는데", "sentAt": "2026-08-15T20:30:00+09:00" },
+    { "messageId": 702, "sender": "USER_B", "content": "아 미안 오늘 갑자기 일이 생겨서 못 갈 것 같아", "sentAt": "2026-08-15T20:34:00+09:00" },
+    { "messageId": 703, "sender": "USER_A", "content": "아 진짜 짜증나", "sentAt": "2026-08-15T20:36:00+09:00" }
+  ],
+  "requestedAt": "2026-08-15T20:37:00+09:00"
+}
