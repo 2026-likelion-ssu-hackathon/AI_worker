@@ -38,6 +38,7 @@
 
 | 문서 | 내용 | 받는 사람 |
 | --- | --- | --- |
+| `docs/api-handoff.md` | **HTTP 연동** — 실행 명령·엔드포인트·실제 요청/응답 JSON | 서버 담당자 |
 | `docs/server-handoff.md` | 실 상태 표현 연동 — 필드 정의·확인 체크리스트 | 서버 담당자 |
 | `docs/contract-review.md` | 규격서 v1 답변 + 요청 사항 | 서버 담당자 |
 | `docs/worker-tasks.md` | 작업 지시서 / 진행 상황 | 나 |
@@ -193,9 +194,21 @@ LLM 이 상호명이나 영상 ID 를 만들면 **존재하지 않는 가게와 
              ◀── AnalysisResponse (동기) ─────────
 ```
 
-HTTP 서버는 아직 만들지 않았다. 규격서가 초안 v1 이고 미확정 항목이 남아 있어서
-**DTO 와 판정 로직만 규격에 맞춰두고 CLI 로 검증한다.** 확정되면 `analyze()` 를
-FastAPI 핸들러에 그대로 물리면 된다.
+**HTTP 서버는 `worker/api.py` 다** (FastAPI, 2026-08-18). `analyze()` 를 그대로 물리고
+**판정 로직을 하나도 갖지 않는다** — CLI(`tools/run.py`)·devui 와 같은 함수를 부른다.
+붙이는 방법은 `docs/api-handoff.md`(서버 담당자 전달본).
+
+```
+POST /internal/v1/chat-analyses   GET /health   GET /docs · /openapi.json
+```
+
+여기서 정한 것 셋. **바꾸려면 서버 담당자와 협의한다.**
+
+| | | 왜 |
+| --- | --- | --- |
+| 오류도 **HTTP 200** | `FAILED` 봉투로 내보낸다 | 규격서에 상태 코드 규정이 없고 `status`·`errorCode` 로 이미 표현된다 |
+| 직렬화는 `to_json_dict()` | FastAPI 기본 직렬화를 안 쓴다 | 기본값은 `exclude_none` 이 안 걸려 `null` 이 나가고 규격서 14장이 깨진다 |
+| **듀얼스택 소켓** | `0.0.0.0` 도 `::` 도 아니다 | Railway 사설망은 IPv6 전용, `--host ::` 는 IPv6 전용 소켓이 된다 (둘 다 실측) |
 
 ---
 
@@ -241,10 +254,11 @@ LangChain을 import하는 파일은 `worker/llm.py`와 `worker/retrieve.py` 둘�
 
 | | 지금 | 후속 |
 | --- | --- | --- |
-| 입력 | `fixtures/*.json` (규격서 요청 형식 그대로) | HTTP POST |
+| 입력 | `fixtures/*.json` + **HTTP POST** (`worker/api.py`) | — |
 | 기억 저장 | `data/memories.json` | Postgres |
-| 출력 | 콘솔 / `--json` / `devui` | HTTP 응답 |
-| 배선 | 함수 호출 + `router.py` | FastAPI 핸들러 |
+| 출력 | 콘솔 / `--json` / `devui` / **HTTP 응답** | — |
+| 배선 | 함수 호출 + `router.py` | — |
+| 배포 | `Dockerfile` + `railway.json` (Railway) | — |
 
 `devui/server.py` 는 브라우저에서 확인하는 용도다. **CLI 와 같은 진입점**(`analyze()`)을
 부르고 판정 로직을 갖지 않는다. 표준 라이브러리만 쓰므로 워커 의존성이 늘지 않는다.
@@ -262,9 +276,11 @@ Redis·Postgres·LangGraph는 **판정 품질에 기여하지 않는다.** 지�
 AI-Worker/
 ├── CLAUDE.md
 ├── README.md
+├── Dockerfile · railway.json    ← 배포 (Railway). 런타임에 필요한 것만 담는다
 ├── docs/
 │   ├── contract-v1.md           ← 백엔드 연동 규격 (팀 합의)
 │   ├── contract-review.md       ← 규격서 답변 + 확인 요청
+│   ├── api-handoff.md           ← HTTP 연동 전달본 (실행·엔드포인트·요청/응답)
 │   ├── spec-v2.md               ← PM 기능 명세 3종
 │   ├── segmentation-v3.md       ← 대화 분절 설계 + 실측 근거
 │   ├── eval-dataset-v1.md       ← 기억/RAG 평가셋 전처리
@@ -282,6 +298,7 @@ AI-Worker/
 │   ├── run.py                   ← CLI 러너
 │   └── build_eval_set.py        ← 외부 대화 데이터 → 평가셋
 └── worker/
+    ├── api.py                   ← HTTP 서버 (FastAPI). 판정 로직 없음
     ├── models.py                ← 규격서 DTO + 내부 스키마
     ├── llm.py                   ← LLM 접근 레이어
     ├── text.py                  ← 한국어 문장 판별 유틸
@@ -647,7 +664,7 @@ A 화면과 B 화면의 ①번 줄 내용이 다르다.
   | | 버전 | 예 |
   | --- | --- | --- |
   | **명세·설계** — 세대가 쌓이고 어느 세대의 결정인지 남겨야 하는 것 | `<주제>-v<n>.md` | `contract-v1` · `spec-v2` · `segmentation-v3` · `state-display-v4` |
-  | **전달본** — 다른 팀에 그대로 보내는 것 | **안 붙인다** | `server-handoff.md` · `contract-review.md` |
+  | **전달본** — 다른 팀에 그대로 보내는 것 | **안 붙인다** | `api-handoff.md` · `server-handoff.md` · `contract-review.md` |
   | **운영 문서** — 상시 갱신되는 것 | 안 붙인다 | `worker-tasks.md` · `README.md` |
 
   명세·설계는 기존 문서를 크게 뜯어고칠 때 덮어쓰지 말고 다음 번호로 새로 만든다.

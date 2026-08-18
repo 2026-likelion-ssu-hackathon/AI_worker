@@ -11,3 +11,7 @@ httpx
 
 # 개발 도구 전용 — 워커 런타임에는 필요 없어서 여기 넣지 않는다.
 # tools/build_eval_set.py (평가셋 빌드) 를 돌릴 때만:  pip install pyarrow
+
+# HTTP 서버 (`worker/api.py`). 판정 로직은 갖지 않고 analyze() 를 물리기만 한다.
+fastapi>=0.115
+uvicorn>=0.30

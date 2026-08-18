@@ -1,0 +1,13 @@
+# 이미지에 들어갈 것은 Dockerfile 이 명시적으로 COPY 한다. 여기는 안전장치다.
+.venv/
+.git/
+.env
+__pycache__/
+*.pyc
+
+data/eval/          # 평가셋 136MB — 개발 도구 전용
+docs/
+devui/
+fixtures/
+parked/
+tools/

@@ -51,6 +51,29 @@ cp .env.example .env      # OPENAI_API_KEY 채우기 (나머지는 선택)
 
 여러 개를 한 번에 돌릴 수 있다: `.venv/bin/python -m tools.run fixtures/*.json --no-persist`
 
+### HTTP 서버로 띄우기 (`worker/api.py`)
+
+채팅 서버가 붙는 진입점이다. 연동 문서는 `docs/api-handoff.md`.
+
+```bash
+.venv/bin/python -m worker.api            # 기본 8000
+PORT=8123 .venv/bin/python -m worker.api  # 포트 지정
+
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/internal/v1/chat-analyses \
+  -H 'Content-Type: application/json' --data-binary @fixtures/case7_tone.json
+```
+
+| 경로 | 내용 |
+| --- | --- |
+| `POST /internal/v1/chat-analyses` | 공통 분석 요청 → 응답 (규격서 5·6장) |
+| `GET /health` | `status` + 외부 API 키가 꽂혔는지 |
+| `GET /docs` · `/openapi.json` | FastAPI 가 자동 생성 |
+
+**`uvicorn` CLI 로 직접 띄우지 않는다.** `main()` 이 IPv4·IPv6 를 같이 받는 듀얼스택
+소켓을 만들어 넘긴다 — Railway 사설망은 IPv6 전용이고 `--host ::` 는 IPv6 전용 소켓이
+된다 (둘 다 실측). 배포는 `Dockerfile` + `railway.json`.
+
 ### 브라우저에서 보기 (`devui/`)
 
 ```bash
@@ -197,6 +220,7 @@ LLM 이 "성수다락" 같은 상호를 지어내면 존재하지 않는 가게�
 | `__init__.py` | `load_dotenv()` 1회 + 경로 상수(`ROOT` / `DATA_DIR` / `PROMPT_DIR`). 어디서 import 해도 `.env` 가 한 번만 읽힌다 |
 | `models.py` | 규격서 DTO 전부 + 내부 스키마. 아래 상세 |
 | `pipeline.py` | `analyze(payload) -> (AnalysisResponse, Trace)` |
+| `api.py` | HTTP 서버 (FastAPI). `analyze()` 를 물리기만 하고 **판정 로직을 갖지 않는다** |
 | `tools/run.py` | CLI 러너. 사람이 읽는 출력 / `--json` / `--verbose` / `--no-persist` |
 | `tools/check_keys.py` | 외부 키 3종이 실제로 붙는지 점검. 유튜브는 1 unit 짜리 `videos.list` 로 검증해 쿼터를 안 쓴다 |
 | `tools/build_eval_set.py` | 외부 멀티세션 대화 → 규격 형식 평가셋. `pyarrow` 필요 (런타임 의존성 아님) |
