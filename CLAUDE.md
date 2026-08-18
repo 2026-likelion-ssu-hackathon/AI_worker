@@ -292,7 +292,7 @@ AI-Worker/
 ├── parked/                      ← 대화 소재 기능 아카이브 (import 되지 않음)
 ├── .env.example
 ├── requirements.txt
-├── fixtures/                    ← case1~case15, 규격서 요청 형식
+├── fixtures/                    ← case1~case16, 규격서 요청 형식
 ├── data/
 │   ├── memories.json            ← 기억 시드 27건
 │   ├── speaker_profiles.json    ← 개인 말투 기준선 시드 (A·B)

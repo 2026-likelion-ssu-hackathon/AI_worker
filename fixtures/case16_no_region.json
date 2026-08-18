@@ -1,0 +1,35 @@
+{
+  "analysisRequestId": "aa16aa16-1616-4c16-9616-aa16aa16aa16",
+  "chatRoomId": 1,
+  "participants": [
+    { "participantKey": "USER_A" },
+    { "participantKey": "USER_B" }
+  ],
+  "messages": [
+    {
+      "messageId": 601,
+      "sender": "USER_A",
+      "content": "주말에 뭐 할까?",
+      "sentAt": "2026-08-15T20:32:00+09:00"
+    },
+    {
+      "messageId": 602,
+      "sender": "USER_B",
+      "content": "글쎄 딱히 계획 없는데",
+      "sentAt": "2026-08-15T20:35:00+09:00"
+    },
+    {
+      "messageId": 603,
+      "sender": "USER_A",
+      "content": "영화나 볼까",
+      "sentAt": "2026-08-15T20:38:00+09:00"
+    },
+    {
+      "messageId": 604,
+      "sender": "USER_B",
+      "content": "그것도 좋고",
+      "sentAt": "2026-08-15T20:41:00+09:00"
+    }
+  ],
+  "requestedAt": "2026-08-15T20:42:00+09:00"
+}
