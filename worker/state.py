@@ -2,9 +2,14 @@
 
 설계와 근거는 `docs/design.md` 2부. 구조만 옮기면:
 
-    ① LLM 채점   화자마다 **감정 5축 점수**(0~5) (호출 1회). 라벨도 문구도 만들지 않는다
+    ① LLM 채점   화자마다 **감정 4축 점수**(0~5) (호출 1회). 라벨도 문구도 만들지 않는다
+    ②' 병합      화자별 유효 점수의 **축별 최댓값** → 커플 공통 점수 (PM 기획 변경 2026-08-19)
     ② 룰 판정    `pick_label()` 의 임계값이 점수에서 라벨을 정한다
     ③ 문구 선택   `copy.STATE_TEXT` 사전에서 라벨로 찾는다
+
+**두 화면의 ①번 줄이 같다.** 원래 각자 상대방의 상태를 보는 개인화 설계였는데 PM 이
+"둘의 상황 하나"로 바꿨다. 규격(`subject`/`viewer` 두 항목)은 그대로 두고 내용만
+동일하게 싣는다 — 백엔드·프론트 무변경 (`read_state` docstring 참조).
 
 **후보 기능이 아니다.** 게이트가 없고 `route()` 를 타지 않는다. 3종은 트리거가 걸릴 때만
 발동하고 미발동이면 ②번 줄이 비지만, 이건 매 요청 돌고 ①번 줄은 비지 않는다.
@@ -169,10 +174,18 @@ def read_state(
     speakers: list[Speaker],
     now: datetime,
 ) -> StateResult:
-    """화자별 상태를 산출한다. **보는 사람 기준으로 한 건씩** 돌려준다.
+    """**둘의 상황 하나**를 산출해 두 화면에 같은 내용으로 내보낸다.
 
-    `subject` 는 감정의 주인이고 `viewer` 는 그걸 보는 사람이다 — 각자 상대방의 상태를
-    본다. 그래서 A 화면과 B 화면의 ①번 줄 내용이 다르다.
+    처음에는 각자 상대방의 상태를 보는 개인화 설계였는데 **PM 기획 변경(2026-08-19)** 으로
+    커플 공통 상태로 바뀌었다. 규격은 안 바꿨다 — `subject`/`viewer` 쌍 두 건을 그대로
+    내보내되 **라벨·강도·문구를 동일하게** 싣는다. 백엔드 분배도 프론트 렌더링도 그대로다.
+
+    병합은 **축별 최댓값**이다. 평균을 쓰면 한쪽의 분노 4 가 상대의 평온 0 에 희석되어
+    임계(MIN_SCORE) 아래로 내려간다 — 갈등 신호가 사라진다. 둘 중 누군가에게 뚜렷한
+    감정이 있으면 그게 둘의 상황이다. 반어 방어(ANGER_WINS)도 최댓값이라야 산다.
+
+    화자 단위 안전 규칙(애정 바닥값 · confident 게이트 · 미채점 무시)은 병합 **전에**
+    화자마다 그대로 적용한다 — 근거 없는 화자의 점수를 지어내지 않는 원칙은 유지된다.
 
     실패는 오류가 아니라 **"이번엔 갱신 없음"** 이다. 빈 목록을 돌려주면 프론트는 직전
     문구를 그대로 두면 된다. 여기서 예외를 던지면 요청 전체가 `FAILED` 가 되고, 상태 한 줄
@@ -189,53 +202,56 @@ def read_state(
     scored = {s.speaker: s for s in out.states if s.speaker in speakers}
     last_at = max(m.sent_at for m in messages)
 
+    # ① 화자별 유효 점수 — 기존 규칙을 화자 단위로 적용한 뒤에야 병합에 넣는다.
+    merged = {"affection": 0, "hurt": 0, "joy": 0, "anger": 0}
+    for subject in speakers:
+        own = [m for m in messages if m.sender == subject]
+        state = scored.get(subject)
+        # 애정 낱말은 직전 발화만 본다 (상수 주석 참조).
+        hinted = any(has_affection_words(m.content) for m in own[-AFFECTION_RECENT:])
+
+        if not own or state is None:
+            # 발화가 없거나 LLM 이 안 채점한 화자 → 기여 없음. 지어내지 않는다.
+            # (미채점이면 애정 룰도 안 태운다 — 분노 점수 없이는 반어를 막을 가드가 없다.)
+            continue
+        if hinted and state.affection < MIN_SCORE:
+            # 명시적 애정 낱말 → 바닥값 보정. 트레이스에도 보정 뒤 값이 남게 갈아 끼운다.
+            state = state.model_copy(update={
+                "affection": MIN_SCORE,
+                "note": f"{state.note} · 룰: 애정 낱말 → affection 바닥값 {MIN_SCORE}",
+            })
+            scored[subject] = state
+        if not state.confident and not hinted:
+            # 신호가 약한 화자는 중립 기여 — 병합에 0 으로 들어간다.
+            continue
+        for axis in merged:
+            merged[axis] = max(merged[axis], getattr(state, axis))
+
+    # ② 병합 점수로 한 번만 판정한다. 판정 규칙(pick_label)은 그대로다.
+    couple = EmotionScores(
+        speaker=speakers[0],  # 스키마 자리 채움 — 트레이스에 안 싣고 라벨 판정에만 쓴다
+        confident=True,
+        note="커플 병합 — 화자별 유효 점수의 축별 최댓값",
+        **merged,
+    )
+    label, intensity = pick_label(couple)
+
+    # ③ 두 항목에 같은 내용을 싣는다. 근거는 둘의 대화 전체라 trigger 도 전체 id 다.
+    #    갱신은 항상 한다(should_show=True) — 한쪽이 침묵해도 다른 쪽 발화가 근거가 된다.
+    all_ids = [m.message_id for m in messages]
     analyses: list[EmotionAnalysis] = []
     for subject in speakers:
         viewer = _partner(subject, speakers)
         if viewer is None:
             continue
-
-        own = [m for m in messages if m.sender == subject]
-        own_ids = [m.message_id for m in own]
-        state = scored.get(subject)
-        # 애정 낱말은 직전 발화만 본다 (상수 주석 참조).
-        hinted = any(has_affection_words(m.content) for m in own[-AFFECTION_RECENT:])
-
-        if not own_ids:
-            # 이 사람의 발화가 활성 맥락에 없다 → 판단할 근거가 없다.
-            # 문구를 지어내지 않고 갱신도 하지 않는다. 화면은 직전 값을 유지한다.
-            label, intensity, should_show = NEUTRAL, 0.0, False
-        elif state is None:
-            # LLM 이 이 화자를 채점하지 않았다 → 애정 룰도 안 태운다.
-            # 분노 점수가 없으면 반어("사랑 같은 소리 하네")를 막을 가드가 없다.
-            label, intensity, should_show = NEUTRAL, 0.0, True
-        else:
-            if hinted and state.affection < MIN_SCORE:
-                # 명시적 애정 낱말 → 바닥값 보정. 트레이스에도 보정 뒤 값이 남게
-                # `scored` 를 갈아 끼운다 — 원점수만 남으면 라벨과 안 맞아 헤맨다.
-                state = state.model_copy(update={
-                    "affection": MIN_SCORE,
-                    "note": f"{state.note} · 룰: 애정 낱말 → affection 바닥값 {MIN_SCORE}",
-                })
-                scored[subject] = state
-            if not state.confident and not hinted:
-                # 신호가 약하다 → 중립을 **띄운다**. 갱신은 한다.
-                # 여기서 갱신을 멈추면 다툼이 끝난 뒤에도 직전의 격한 문구가 계속 남는다.
-                # 애정 낱말이 있으면 예외다 — 낱말 자체가 프롬프트가 요구하는 "문장으로
-                # 짚을 수 있는 근거"라서 confident 를 룰이 대신 채운 것으로 본다.
-                label, intensity, should_show = NEUTRAL, 0.0, True
-            else:
-                label, intensity = pick_label(state)
-                should_show = True
-
         analyses.append(
             EmotionAnalysis(
                 subject_participant=to_key(subject),
                 viewer_participant=to_key(viewer),
                 emotion_type=label,  # type: ignore[arg-type]
                 intensity_value=intensity,
-                should_show=should_show,
-                trigger_message_ids=own_ids,
+                should_show=True,
+                trigger_message_ids=all_ids,
                 expires_at=last_at + EXPIRE_AFTER,
                 state_text=STATE_TEXT[label],
             )
