@@ -77,13 +77,13 @@ def _cut_reason(seg, scores: dict, prev_end) -> str:
     if score is None:
         return "판정 정보 없음 (폴백)"
 
-    if score.topic_score < segment.CUT_HARD:
-        return f"화제 {score.topic_score} < {segment.CUT_HARD} — 무조건 자름"
+    if score.topic < segment.CUT_HARD:
+        return f"화제 {score.topic} < {segment.CUT_HARD} — 무조건 자름"
 
     soft = int(segment.GAP_SOFT.total_seconds() // 60)
     if gap >= soft:
-        return f"회색(화제 {score.topic_score}) + 공백 {gap}분 ≥ {soft}분"
-    return f"회색(화제 {score.topic_score}) + 말투 {score.tone_score} < {segment.TONE_CUT}"
+        return f"회색(화제 {score.topic}) + 공백 {gap}분 ≥ {soft}분"
+    return f"회색(화제 {score.topic}) + 말투 {score.tone} < {segment.TONE_CUT}"
 
 
 def _minutes(prev, cur) -> int:
@@ -93,7 +93,7 @@ def _minutes(prev, cur) -> int:
 
 
 def _segments_json(trace: Trace) -> list[dict]:
-    scores = {s.message_id: s for s in trace.scores}
+    scores = {s.id: s for s in trace.scores}
     out = []
     prev_end = None
     for i, seg in enumerate(trace.segments):

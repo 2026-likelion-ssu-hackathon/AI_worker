@@ -56,11 +56,11 @@ def _show_trace(trace: Trace) -> None:
         print(f"  연속성점수 {DIM}(높을수록 이전 맥락과 이어짐 · "
               f"컷<{segment.CUT_HARD} 회색 유지≥{segment.KEEP_SOFT}){OFF}")
         for sc in trace.scores:
-            mark = "✂" if sc.message_id in cut_ids else " "
-            zone = ("자름" if sc.topic_score < segment.CUT_HARD
-                    else "유지" if sc.topic_score >= segment.KEEP_SOFT else "회색")
-            print(f"          {mark} #{sc.message_id} 화제 {sc.topic_score:>3} "
-                  f"말투 {sc.tone_score:>3} 같은맥락={str(sc.same_context):<5} {zone}")
+            mark = "✂" if sc.id in cut_ids else " "
+            zone = ("자름" if sc.topic < segment.CUT_HARD
+                    else "유지" if sc.topic >= segment.KEEP_SOFT else "회색")
+            print(f"          {mark} #{sc.id} 화제 {sc.topic:>3} "
+                  f"말투 {sc.tone:>3} 같은맥락={str(sc.same):<5} {zone}")
 
     if trace.state_scored:
         # 5축 점수와 거기서 룰이 고른 라벨. note 는 내부용이라 화면에 안 나간다.

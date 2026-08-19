@@ -301,12 +301,18 @@ class AnalysisResponse(Camel):
 #
 # docstring 을 짧게 두는 이유는 `EmotionScores` 위 주석 참조 — 매 요청 전송된다.
 class SegmentScore(BaseModel):
-    """발화 하나의 맥락 연속성 점수. 높을수록 이어진다."""
+    """발화 하나의 맥락 연속성 점수. 높을수록 이어진다.
 
-    message_id: int
-    same_context: bool
-    topic_score: int   # 0~100 — 화제가 이어지는 정도
-    tone_score: int    # 0~100 — 말투가 이어지는 정도
+    **필드명이 짧은 이유 — 출력이 발화마다 반복되기 때문이다.** 생산 창(메시지 30개)에서는
+    필드명 토큰이 그대로 30번 곱해진다. `message_id`·`same_context`·`topic_score`·
+    `tone_score` 로 뒀을 때 발화당 ~20토큰(창 30개 = 585토큰, 7.4초)이었고 축약으로
+    발화당 ~11토큰이 된다. 뜻은 프롬프트(`segment.md`)가 정의한다.
+    """
+
+    id: int      # message_id
+    same: bool   # 앞과 같은 이야기인가
+    topic: int   # 0~100 — 화제가 이어지는 정도
+    tone: int    # 0~100 — 말투가 이어지는 정도
 
     # ⚠️ 근거 문구(`note`) 필드를 두지 않는다. 발화마다 한 줄씩 쓰게 하면 출력이 292 토큰까지
     # 늘어 분절 호출이 4.0초가 된다 — 빼면 2.3초다. 두 케이스를 5회씩 끝단으로 돌려

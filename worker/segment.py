@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -95,41 +96,84 @@ def _rule_cut(messages: list[Message]) -> list[list[Message]]:
 # --------------------------------------------------------------------------
 # ② LLM 채점
 # --------------------------------------------------------------------------
-def _transcript(messages: list[Message]) -> str:
+def _lines(messages: list[Message]) -> str:
     """`[HH:MM]` 을 붙인다.
 
     안 붙이면 **LLM 이 시간 공백을 아예 못 본다.** 2시간 50분이 벌어져도 안 보이고,
     3시간 룰 컷 바로 아래 구간이 통째로 사각지대가 된다 (문서 3-7).
     다른 프롬프트는 `text.format_transcript()` 가 같은 일을 한다.
     """
-    lines = [
+    return "\n".join(
         f"[{m.message_id}] ({m.sent_at:%m-%d %H:%M}) {m.sender}: {m.content}"
         for m in messages
-    ]
-    return f"## 대화 ({len(messages)}개)\n" + "\n".join(lines)
+    )
+
+
+def _transcript(context: list[Message], targets: list[Message]) -> str:
+    """채점 대상과 앞 맥락을 구획으로 나눠 준다. 맥락이 없으면 기존 단일 형식 그대로다."""
+    body = f"## 대화 ({len(targets)}개)\n{_lines(targets)}"
+    if not context:
+        return body
+    return (
+        f"## 앞 맥락 (채점하지 않는다)\n{_lines(context)}\n\n"
+        f"## 채점 대상 ({len(targets)}개)\n{_lines(targets)}"
+    )
+
+
+# 한 호출이 채점하는 최대 발화 수. **출력이 발화 수에 비례해서 지연도 비례한다** —
+# 생산 창(메시지 30개)을 한 호출로 채점하면 출력 ~470토큰에 7~8초다.
+# 넘으면 배치로 나눠 **동시에** 부른다. 각 배치 호출은 자기 앞의 전체 맥락을 '앞 맥락'
+# 구획으로 그대로 보므로 **판단 재료는 한 호출일 때와 같다** — 출력만 나뉜다.
+SCORE_BATCH = 15
+
+
+def _ask_scores(context: list[Message], targets: list[Message]) -> list[SegmentScore]:
+    out = ask(SegmentLLMOutput, load_prompt("segment"), _transcript(context, targets))
+    return out.scores
 
 
 def _score(chunk: list[Message]) -> list[SegmentScore] | None:
-    """발화별 연속성 점수. 호출 자체가 실패하면 None → 자르지 않는다.
+    """발화별 연속성 점수. 호출 전부가 실패하면 None → 자르지 않는다.
 
     **점수가 빠지거나 엉뚱한 id 가 섞여도 통째로 버리지 않는다.** 아는 id 만 남기고
     나머지는 없는 대로 둔다 — 빠진 발화는 `_cut_by_score()` 에서 "안 자름"으로 처리된다.
+    배치 호출 하나가 실패해도 같다 — 그 구간만 "안 자름"이 되고 나머지 경계는 산다.
 
     전량 대조로 하면 실패 반경이 너무 크다. 점수 하나가 어긋났다고 조각 전체를 세그먼트
     1개로 되돌리면 **길게 나눠 놨던 경계가 통째로 사라진다.** 대화가 길수록 어긋날 확률은
     올라가는데 잃는 것도 같이 커진다 — 가장 나쁜 조합이다.
     """
-    try:
-        out = ask(SegmentLLMOutput, load_prompt("segment"), _transcript(chunk))
-    except Exception:  # noqa: BLE001 — 채점 실패는 오류가 아니라 '안 나눔'이다
+    to_score = chunk[1:]  # 첫 발화는 비교할 앞이 없다
+    if not to_score:
         return None
+    n_batches = -(-len(to_score) // SCORE_BATCH)
+    size = -(-len(to_score) // n_batches)
+
+    raw: list[SegmentScore] = []
+    if n_batches == 1:
+        try:
+            raw = _ask_scores([], chunk)
+        except Exception:  # noqa: BLE001 — 채점 실패는 오류가 아니라 '안 나눔'이다
+            return None
+    else:
+        jobs = [
+            (chunk[: 1 + i], to_score[i : i + size])
+            for i in range(0, len(to_score), size)
+        ]
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            futures = [pool.submit(_ask_scores, ctx, tgt) for ctx, tgt in jobs]
+            for future in futures:
+                try:
+                    raw.extend(future.result())
+                except Exception:  # noqa: BLE001 — 이 배치만 '안 자름'이 된다
+                    continue
 
     known = {m.message_id for m in chunk[1:]}
     seen: set[int] = set()
     scores: list[SegmentScore] = []
-    for s in out.scores:
-        if s.message_id in known and s.message_id not in seen:
-            seen.add(s.message_id)
+    for s in raw:
+        if s.id in known and s.id not in seen:
+            seen.add(s.id)
             scores.append(s)
     return scores or None
 
@@ -143,9 +187,9 @@ def _should_cut(score: SegmentScore, gap: timedelta) -> bool:
     회색지대(CUT_HARD ~ KEEP_SOFT)에서는 **붙이는 쪽이 기본값이다.** 잘못 자르면 뒤
     단계가 맥락을 잃지만, 안 자르면 분절 전과 같아질 뿐이다 — 되돌릴 수 있는 실수를 택한다.
     """
-    if score.topic_score >= KEEP_SOFT:
+    if score.topic >= KEEP_SOFT:
         return False
-    if score.topic_score < CUT_HARD:
+    if score.topic < CUT_HARD:
         return True
 
     # 회색지대 — 보조 신호로만 결정한다.
@@ -156,7 +200,7 @@ def _should_cut(score: SegmentScore, gap: timedelta) -> bool:
     # 없는 일반론이 된다 — 말투 교정이 자기 발밑을 판다 (문서 3-5).
     if gap >= GAP_SOFT:
         return True
-    return score.tone_score < TONE_CUT and not score.same_context
+    return score.tone < TONE_CUT and not score.same
 
 
 def _cut_by_score(chunk: list[Message], scores: list[SegmentScore]) -> list[Segment]:
@@ -165,7 +209,7 @@ def _cut_by_score(chunk: list[Message], scores: list[SegmentScore]) -> list[Segm
     순서대로 zip 하지 않는 이유: 점수가 하나라도 빠지면 그 뒤가 전부 한 칸씩 밀려서
     엉뚱한 자리에서 잘린다. id 로 맞추면 빠진 것만 조용히 넘어간다.
     """
-    by_id = {s.message_id: s for s in scores}
+    by_id = {s.id: s for s in scores}
     segments: list[Segment] = []
     current: list[Message] = [chunk[0]]
 
