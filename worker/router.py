@@ -128,11 +128,6 @@ def demo_hit(ctx: "Context", word: str) -> Message | None:
     last = ctx.active[-1]
     return last if word in last.content else None
 
-# 유튜브 **화제 갈래**가 비켜야 하는 데이트 신호.
-#
-# 4종 중 `category`("배고파" · "카페" · "맛집")는 뺐다 — 단어 하나로 걸려서 먹방 얘기가
-# 데이트 의도로 잡힌다. 나머지 셋은 실제로 약속을 잡는 신호라 장소 추천이 맞다.
-DATE_INTENT_STRONG = {"plan_question", "schedule_fixed", "recall"}
 
 
 class Trace:
@@ -437,29 +432,21 @@ class DateCandidate:
 # 후보 3 — 유튜브 영상 추천
 # --------------------------------------------------------------------------
 class YoutubeCandidate:
-    """명세의 두 갈래를 모두 태운다 — **관계 고민 신호 또는 공통 관심 주제**
-    (`docs/spec.md` 3장).
+    """**고민 갈래만 탄다** — 싸우고 서먹한 냉각기에만 영상을 제안한다.
 
-        ① 고민 갈래   싸우고 서먹할 때. 노출 범위를 LLM 이 정한다 (개별/공통)
-        ② 화제 갈래   평범한 일상 대화에서 화제가 뚜렷할 때. 항상 COUPLE
-
-    **고민이 우선이다.** 둘 다 신호가 있으면 고민 갈래를 탄다 — 감정이 걸린 대화에
-    먹방 영상을 띄우면 눈치가 없다.
-
-    두 갈래는 **프롬프트도 화면 문구도 따로**다. 판정 기준이 다르기 때문이다 —
-    고민은 "이 상황에 도움이 되는가", 화제는 "그 소재를 실제로 다루는가".
+    ⛔ **화제 갈래(일상 대화 영상 추천)는 비활성화됐다 (2026-08-19 사용자 결정).**
+    명세(`docs/spec.md` 3장)의 두 갈래 중 "공통 관심 주제" 쪽을 끊은 것이다.
+    구현(`youtube.classify_topic` · `check_topic_gate` · `yt_topic.md` 프롬프트)은
+    검증까지 끝난 상태로 남아 있고 **여기 라우팅에서만 끊었다** — 되살리려면 이
+    `build()` 에서 고민 게이트 불통과 시 `_topic()` 을 다시 부르면 된다 (git: 01e8fc7
+    이전). '유튜브' 낱말 시연 강제 트리거도 화제 갈래를 태우는 것이라 함께 내렸다.
     """
 
     name = "youtube"
 
     def build(self, ctx: Context) -> AiResult | None:
-        # 시연 강제 트리거 — 억제·쿨다운·게이트를 전부 건너뛰고 화제 갈래를 태운다.
-        if (demo := demo_hit(ctx, "유튜브")) is not None:
-            return self._topic(ctx, demo=demo)
-
         # **억제를 게이트보다 먼저 본다.** 뒤에 두면 이미 LLM 분류를 부른 뒤라
         # 아낀 게 검색 쿼터뿐이다. 여기서 끊으면 LLM 호출까지 같이 준다.
-        # 두 갈래에 똑같이 건다 — 쿼터는 갈래를 가리지 않고 한 통에서 나간다.
         last = ctx.last_result_at("YOUTUBE_RECOMMENDATION")
         if last is not None and YOUTUBE_COOLDOWN_MIN > 0:
             # ① 같은 화제엔 하나만 — 마지막 영상이 활성 세그먼트 시작 뒤에 나갔으면
@@ -479,14 +466,13 @@ class YoutubeCandidate:
                 return None
 
         concern_ids = youtube.check_concern_gate(ctx.active)
-        if concern_ids:
-            return self._concern(ctx, concern_ids)
-        return self._topic(ctx)
+        if not concern_ids:
+            # 고민 신호가 없으면 침묵 — 일상 화제에는 영상을 띄우지 않는다 (화제 갈래 비활성).
+            return None
+        return self._concern(ctx, concern_ids)
 
     # ---------------------------------------------------------------- 공통
-    def _candidates(
-        self, ctx: Context, queries: list[str], demo: Message | None = None
-    ) -> list[Video] | None:
+    def _candidates(self, ctx: Context, queries: list[str]) -> list[Video] | None:
         """검색 → 금지어·중복 제외. 쓸 후보가 없으면 None."""
         videos = youtube.find_candidates(queries)
 
@@ -500,8 +486,7 @@ class YoutubeCandidate:
         # 규격서 10장 — "동일 영상을 최근에 추천한 경우 다른 후보 탐색".
         # **LLM 에 보이기 전에 뺀다.** 후보 목록에 남겨두고 "고르지 말라"고 하면
         # 지시를 어길 여지가 생기고, 후보가 줄어든 만큼 검색을 더 하지도 않는다.
-        # 시연 모드에서는 안 뺀다 — 연달아 부르면 후보가 전부 걸러져 침묵한다 (데이트와 동일).
-        seen = ctx.recent_keys("YOUTUBE_RECOMMENDATION") if demo is None else set()
+        seen = ctx.recent_keys("YOUTUBE_RECOMMENDATION")
         if seen:
             before = len(videos)
             videos = [v for v in videos if v.video_id not in seen]
@@ -554,78 +539,6 @@ class YoutubeCandidate:
                 return result
             return youtube.to_result(
                 concern, videos[again.picked_index], again.recommendation_reason, trigger_ids
-            )
-
-        return _fit(ctx, self.name, result, _again)
-
-    # ---------------------------------------------------------------- ② 화제
-    def _topic(self, ctx: Context, demo: Message | None = None) -> AiResult | None:
-        # **데이트 의도가 뚜렷하면 화제 갈래를 타지 않는다.**
-        # "주말에 뭐 할까" 에는 장소 추천이 나가야 한다. 영상이 끼어들면 자리를 뺏는다.
-        #
-        # 데이트 **결과**가 아니라 **게이트**(룰)를 본다. 결과를 기다리면 데이트 체인
-        # (계획 → 카카오 → 문구, 약 6초)이 끝날 때까지 유튜브가 묶여서 병렬이 깨진다.
-        # 게이트는 정규식이라 공짜다.
-        #
-        # ⚠️ **`category` 단독은 막지 않는다.** 그 신호는 "배고파" · "맛집" 같은 단어
-        # 하나로 걸려서, **먹방 얘기가 통째로 데이트 의도로 잡힌다** (실측 — case13).
-        # 약속을 잡는 신호(계획 질문 · 일정 확정 · 이전 약속 재언급)일 때만 비킨다.
-        # 약한 신호로 데이트가 실제로 발동하면 `run()` 이 조립 시점에 뺀다.
-        if demo is None:
-            kinds = set(date_course.check_date_gate(ctx.active).kinds)
-            if kinds & DATE_INTENT_STRONG:
-                ctx.trace.skip(self.name, "약속을 잡는 대화 — 장소 추천에 자리를 넘김")
-                return None
-
-            trigger_ids = youtube.check_topic_gate(ctx.active)
-            if not trigger_ids:
-                return None
-        else:
-            trigger_ids = [demo.message_id]
-
-        if not self._ready(ctx):
-            return None
-
-        topic = youtube.classify_topic(ctx.active)
-        ctx.trace.topic = topic
-        if not topic.should_recommend or not topic.queries:
-            if demo is None:
-                ctx.trace.skip(self.name, "LLM 판정 — 영상으로 이어 붙일 화제가 아님")
-                return None
-            # 시연 모드 — 검색어가 없으면 방금 발화에서 키워드를 뺀 나머지로 검색한다.
-            fallback = demo.content.replace("유튜브", "").strip() or "커플 브이로그"
-            topic = topic.model_copy(update={"should_recommend": True, "queries": [fallback]})
-            ctx.trace.warn(self.name, f"시연 모드 — LLM 보류 무시, 검색어 '{fallback}'")
-
-        videos = self._candidates(ctx, topic.queries, demo=demo)
-        if videos is None:
-            return None
-
-        pick = youtube.pick_topic_video(ctx.active, topic, videos)
-        if not 0 <= pick.picked_index < len(videos):
-            if demo is None:
-                ctx.trace.skip(self.name, "후보 전원 탈락 — 침묵")
-                return None
-            # 시연 모드 — 침묵 대신 첫 후보를 쓴다. 문구는 효과를 약속하지 않는 고정문.
-            pick = pick.model_copy(update={
-                "picked_index": 0,
-                "recommendation_reason": "말씀 나눈 주제와 이어지는 영상이에요",
-            })
-            ctx.trace.warn(self.name, "시연 모드 — LLM 이 후보를 전원 탈락시켜 첫 후보로 대체")
-
-        video = videos[pick.picked_index]
-        ctx.trace.yt_picked = video
-        result = youtube.to_topic_result(video, pick.recommendation_reason, trigger_ids)
-        if not is_clean(result):
-            ctx.trace.skip(self.name, f"금지어 필터 — '{banned_in(result)}'")
-            return None
-
-        def _again() -> AiResult:
-            again = youtube.pick_topic_video(ctx.active, topic, videos)
-            if not 0 <= again.picked_index < len(videos):
-                return result
-            return youtube.to_topic_result(
-                videos[again.picked_index], again.recommendation_reason, trigger_ids
             )
 
         return _fit(ctx, self.name, result, _again)
@@ -705,7 +618,6 @@ def route(ctx: Context) -> list[AiResult]:
             SUPPRESS_YOUTUBE_WHEN_TONE
             and candidate.name == "youtube"
             and any(r.result_type == "TONE_CORRECTION" for r in results)
-            and demo_hit(ctx, "유튜브") is None
         ):
             ctx.trace.skip(candidate.name, "말투 교정이 발동한 요청 — 냉각기가 아니므로 보류")
             continue
@@ -768,8 +680,7 @@ def run(ctx: Context) -> tuple[list[EmotionAnalysis], list[AiResult]]:
 
         # 유튜브는 말투 결과를 알아야 한다 (의존 ②)
         tone_result = f_tone.result()
-        demo_yt = demo_hit(ctx, "유튜브")
-        if SUPPRESS_YOUTUBE_WHEN_TONE and tone_result is not None and demo_yt is None:
+        if SUPPRESS_YOUTUBE_WHEN_TONE and tone_result is not None:
             ctx.trace.skip(youtube.name, "말투 교정이 발동한 요청 — 냉각기가 아니므로 보류")
             f_youtube = None
         else:
@@ -781,15 +692,6 @@ def run(ctx: Context) -> tuple[list[EmotionAnalysis], list[AiResult]]:
             youtube.name: f_youtube.result() if f_youtube is not None else None,
         }
         states = f_state.result()
-
-    # 약한 데이트 신호(`category` 단독)로 화제 갈래가 돌았는데 데이트가 실제로 발동했다면
-    # 화제 갈래는 뺀다. **"데이트 코스가 떠야 할 때는 영상을 띄우지 않는다"** 가 규칙이다.
-    # 여기서 빼는 것은 지연을 늘리지 않는다 — 둘 다 이미 병렬로 끝나 있다.
-    # (고민 갈래는 빼지 않는다. 갈등과 데이트는 성격이 달라 같이 떠도 어색하지 않다.)
-    if by_name[date.name] is not None and ctx.trace.topic is not None and demo_yt is None:
-        if by_name[youtube.name] is not None:
-            ctx.trace.skip(youtube.name, "데이트 코스가 발동한 요청 — 화제 갈래는 자리를 넘김")
-        by_name[youtube.name] = None
 
     results: list[AiResult] = []
     for candidate in CANDIDATES:
