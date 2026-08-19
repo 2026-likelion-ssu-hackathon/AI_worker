@@ -19,7 +19,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 from worker import ytapi
 from worker.copy import YOUTUBE_GUIDE, YOUTUBE_TOPIC_GUIDE
@@ -257,3 +259,33 @@ def available() -> bool:
 
 def find_candidates(queries: list[str]) -> list[Video]:
     return ytapi.find_candidates(queries)
+
+
+# --------------------------------------------------------------------------
+# 시드 폴백 — API 가 죽었을 때(쿼터 소진 · 키 없음)의 마지막 후보
+# --------------------------------------------------------------------------
+# `data/yt_seed.json` 은 빌드 타임에 **실제 YouTube API 로 수집**한 영상이다
+# (`tools/build_yt_seed.py`, 고민 유형별 2~3건 · 댓글 포함 · 금지어 검수 완료).
+# "실재하는 것은 외부 API 가 준 것만"의 예외가 아니라 그 원칙을 앞당긴 것이다.
+# 댓글까지 저장돼 있어 `pick_video` 의 맥락 검증이 시드에서도 그대로 돈다.
+_SEED_PATH = Path(__file__).resolve().parent.parent / "data" / "yt_seed.json"
+_seed_cache: dict[str, list[Video]] | None = None
+
+
+def seed_available() -> bool:
+    return _SEED_PATH.exists()
+
+
+def seed_videos(concern: str) -> list[Video]:
+    """고민 유형에 맞는 시드 영상. 파일이 없거나 깨졌으면 빈 목록 — 조용한 미발동."""
+    global _seed_cache
+    if _seed_cache is None:
+        try:
+            rows = json.loads(_SEED_PATH.read_text(encoding="utf-8"))
+            cache: dict[str, list[Video]] = {}
+            for row in rows:
+                cache.setdefault(row["concern"], []).append(Video(**row["video"]))
+            _seed_cache = cache
+        except Exception:  # noqa: BLE001 — 시드 문제는 오류가 아니라 폴백 없음이다
+            _seed_cache = {}
+    return list(_seed_cache.get(concern, []))

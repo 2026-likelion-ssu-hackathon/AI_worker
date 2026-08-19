@@ -16,7 +16,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY worker/ worker/
-COPY data/memories.json data/speaker_profiles.json data/
+COPY data/memories.json data/speaker_profiles.json data/yt_seed.json data/
 
 # `uvicorn` CLI 를 직접 부르지 않는다. `worker/api.py` 의 `main()` 이 IPv4·IPv6 를
 # 같이 받는 듀얼스택 소켓을 만들어 넘기기 때문이다 — Railway 의 프로젝트 내부 통신은

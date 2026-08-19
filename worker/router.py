@@ -499,15 +499,28 @@ class YoutubeCandidate:
             return None
         return videos
 
-    def _ready(self, ctx: Context) -> bool:
-        if youtube.available():
-            return True
-        ctx.trace.skip(self.name, "YOUTUBE_API_KEY 없음 — 영상을 지어내지 않고 미발동")
-        return False
+    def _seed_candidates(self, ctx: Context, concern_type: str) -> list[Video] | None:
+        """시드 폴백 — 빌드 타임에 실제 API 로 수집한 영상 (`data/yt_seed.json`).
+
+        최근 추천 중복 제외는 여기서도 그대로 건다. 금지어는 수집 시점에 검수됐고
+        최종 출력은 어차피 `is_clean()` 을 거친다.
+        """
+        videos = youtube.seed_videos(concern_type)
+        seen = ctx.recent_keys("YOUTUBE_RECOMMENDATION")
+        if seen:
+            videos = [v for v in videos if v.video_id not in seen]
+        ctx.trace.yt_candidates = videos
+        if not videos:
+            ctx.trace.skip(self.name, "YouTube API 불가 + 시드 소진 — 침묵")
+            return None
+        ctx.trace.warn(self.name, f"YouTube API 불가 — 시드 폴백 {len(videos)}건에서 선정")
+        return videos
 
     # ---------------------------------------------------------------- ① 고민
     def _concern(self, ctx: Context, trigger_ids: list[int]) -> AiResult | None:
-        if not self._ready(ctx):
+        # API 도 시드도 없을 때만 미발동. 시드가 있으면 키 없이도 굴러간다.
+        if not youtube.available() and not youtube.seed_available():
+            ctx.trace.skip(self.name, "YOUTUBE_API_KEY 도 시드도 없음 — 영상을 지어내지 않고 미발동")
             return None
 
         concern = youtube.classify_concern(ctx.active)
@@ -516,9 +529,13 @@ class YoutubeCandidate:
             ctx.trace.skip(self.name, "LLM 판정 — 관계 고민 신호 아님")
             return None
 
-        videos = self._candidates(ctx, concern.queries)
+        videos = self._candidates(ctx, concern.queries) if youtube.available() else None
         if videos is None:
-            return None
+            # 검색이 죽었다(쿼터 소진 · 키 없음 · 네트워크) → 시드 폴백.
+            # 시드도 실제 API 산출물이고 댓글까지 있어서 아래 pick 검증이 그대로 돈다.
+            videos = self._seed_candidates(ctx, concern.concern)
+            if videos is None:
+                return None
 
         pick = youtube.pick_video(ctx.active, concern, videos)
         if not 0 <= pick.picked_index < len(videos):

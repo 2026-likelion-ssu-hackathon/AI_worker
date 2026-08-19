@@ -234,13 +234,19 @@ LangChain을 import하는 파일은 `worker/llm.py`와 `worker/retrieve.py` 둘�
 | --- | --- | --- |
 | `OPENAI_API_KEY` | 전부 | 동작 불가 |
 | `KAKAO_REST_API_KEY` | 데이트 코스 | 미발동 (장소를 지어내지 않는다) |
-| `YOUTUBE_API_KEY` | 유튜브 추천 | 미발동 (영상을 지어내지 않는다) |
+| `YOUTUBE_API_KEY` | 유튜브 추천 | **시드 폴백** — `data/yt_seed.json` (아래) |
 
 유튜브 무료 쿼터는 하루 10,000 units 이고 `search.list` 가 호출당 100 units 다.
 추천 1건에 약 105 units → **하루 약 95회.** 개발 중 반복 실행에 주의.
-**소진되면 오류가 아니라 조용한 미발동이 된다** — 화면에서 "적절한 영상이 없었다"와
-구분되지 않는다. 운영 중 억제는 세그먼트 기준("같은 화제엔 하나만") +
-`router.YOUTUBE_COOLDOWN_MIN` 백스톱이 맡는다.
+운영 중 억제는 세그먼트 기준("같은 화제엔 하나만") + `router.YOUTUBE_COOLDOWN_MIN`
+백스톱이 맡는다.
+
+**쿼터가 소진되면 시드 폴백으로 넘어간다** (2026-08-19). `data/yt_seed.json` 은
+빌드 타임에 **실제 YouTube API 로 수집**한 고민 유형별 영상 19건(댓글 포함, 금지어
+검수 완료, `tools/build_yt_seed.py`)이다. 검색이 죽으면(쿼터·키 없음·네트워크) 분류된
+고민 유형의 시드에서 `pick_video` 가 평소처럼 댓글을 읽고 고른다 — 지어내는 게 아니라
+API 산출물을 미리 받아둔 것이라 "실재하는 것만" 원칙 그대로다. 시드 갱신은 빌드
+스크립트를 다시 돌려 커밋한다.
 
 ### LangChain 규칙 (중요)
 
