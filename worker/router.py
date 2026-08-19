@@ -388,7 +388,11 @@ class DateCandidate:
 
         # 최근에 이미 추천한 장소는 뺀다. 같은 커플에게 매번 같은 코스를 주지 않는다.
         # 서버가 `recentResults` 를 안 보내면 빈 집합이라 아무것도 안 걸러진다.
-        seen = ctx.recent_keys("DATE_RECOMMENDATION")
+        #
+        # **시연 모드에서는 안 뺀다.** 트리거를 연달아 부르면 방금 준 장소가 전부 제외돼
+        # 3자리를 못 채우고 조용히 미발동한다 — 배포 실측(2026-08-19, 성수 2연발에서
+        # 두 번째 미발동). 같은 코스가 또 떠도 "말했는데 안 뜨는" 것보다 낫다.
+        seen = ctx.recent_keys("DATE_RECOMMENDATION") if demo is None else set()
         if seen:
             dropped = [p.name for p in course if p.name in seen]
             course = [p for p in course if p.name not in seen]
@@ -480,7 +484,9 @@ class YoutubeCandidate:
         return self._topic(ctx)
 
     # ---------------------------------------------------------------- 공통
-    def _candidates(self, ctx: Context, queries: list[str]) -> list[Video] | None:
+    def _candidates(
+        self, ctx: Context, queries: list[str], demo: Message | None = None
+    ) -> list[Video] | None:
         """검색 → 금지어·중복 제외. 쓸 후보가 없으면 None."""
         videos = youtube.find_candidates(queries)
 
@@ -494,7 +500,8 @@ class YoutubeCandidate:
         # 규격서 10장 — "동일 영상을 최근에 추천한 경우 다른 후보 탐색".
         # **LLM 에 보이기 전에 뺀다.** 후보 목록에 남겨두고 "고르지 말라"고 하면
         # 지시를 어길 여지가 생기고, 후보가 줄어든 만큼 검색을 더 하지도 않는다.
-        seen = ctx.recent_keys("YOUTUBE_RECOMMENDATION")
+        # 시연 모드에서는 안 뺀다 — 연달아 부르면 후보가 전부 걸러져 침묵한다 (데이트와 동일).
+        seen = ctx.recent_keys("YOUTUBE_RECOMMENDATION") if demo is None else set()
         if seen:
             before = len(videos)
             videos = [v for v in videos if v.video_id not in seen]
@@ -590,7 +597,7 @@ class YoutubeCandidate:
             topic = topic.model_copy(update={"should_recommend": True, "queries": [fallback]})
             ctx.trace.warn(self.name, f"시연 모드 — LLM 보류 무시, 검색어 '{fallback}'")
 
-        videos = self._candidates(ctx, topic.queries)
+        videos = self._candidates(ctx, topic.queries, demo=demo)
         if videos is None:
             return None
 
