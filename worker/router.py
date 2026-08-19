@@ -104,6 +104,30 @@ SUPPRESS_YOUTUBE_WHEN_TONE = True
 # 시연 리허설을 연달아 돌려야 하면 `KAKAPO_YOUTUBE_COOLDOWN_MIN=0` — 둘 다 꺼진다.
 YOUTUBE_COOLDOWN_MIN = float(os.getenv("KAKAPO_YOUTUBE_COOLDOWN_MIN", "5"))
 
+# --------------------------------------------------------------------------
+# 시연 강제 트리거 — **환경변수로만 켠다. 기본은 꺼짐.**
+#
+# 방금 발화에 '데이트' / '유튜브' 낱말이 보이면 판단(게이트 · 억제 · LLM 보류)을 건너뛰고
+# 해당 추천을 무조건 태운다. 시연에서 "말했는데 안 뜨는" 사고를 없애기 위한 것이다.
+#
+# **안 건너뛰는 것** — 절대 제약은 데모에서도 유지된다:
+#   · 금지어 필터 (외부 문자열 포함)
+#   · "이름·링크는 외부 API 가 준 것만" (카카오 0건이면 그 자리는 여전히 못 채운다)
+#   · 화면 자수 한도
+#
+# **마지막 발화만 본다.** 세그먼트 전체를 보면 백엔드가 메시지 1건마다 부르는 구조상
+# 키워드 이후 모든 메시지에서 재발동해 유튜브 쿼터가 마른다.
+DEMO_TRIGGERS = os.getenv("KAKAPO_DEMO_TRIGGERS", "").strip().lower() in ("1", "true", "on")
+DEMO_DATE_REGION = os.getenv("KAKAPO_DEMO_REGION", "성수").strip()
+
+
+def demo_hit(ctx: "Context", word: str) -> Message | None:
+    """시연 모드에서 방금 발화에 낱말이 있으면 그 발화. 아니면 None."""
+    if not DEMO_TRIGGERS or not ctx.active:
+        return None
+    last = ctx.active[-1]
+    return last if word in last.content else None
+
 # 유튜브 **화제 갈래**가 비켜야 하는 데이트 신호.
 #
 # 4종 중 `category`("배고파" · "카페" · "맛집")는 뺐다 — 단어 하나로 걸려서 먹방 얘기가
@@ -299,7 +323,15 @@ class DateCandidate:
     name = "date"
 
     def build(self, ctx: Context) -> AiResult | None:
+        demo = demo_hit(ctx, "데이트")
         gate = date_course.check_date_gate(ctx.active)
+        if demo is not None and not gate.triggered:
+            gate = DateGateResult(
+                triggered=True,
+                kinds=["plan_question"],
+                detail="시연 강제 트리거 — '데이트'",
+                message_ids=[demo.message_id],
+            )
         ctx.trace.date_gate = gate
         if not gate.triggered:
             return None
@@ -315,8 +347,10 @@ class DateCandidate:
         plan = date_course.plan_date(ctx.active, memories, gate)
         ctx.trace.date_plan = plan
         if not plan.should_recommend:
-            ctx.trace.skip(self.name, "LLM 판정 — 지금 제안할 상황이 아님")
-            return None
+            if demo is None:
+                ctx.trace.skip(self.name, "LLM 판정 — 지금 제안할 상황이 아님")
+                return None
+            ctx.trace.warn(self.name, "시연 모드 — LLM 보류를 무시하고 진행")
 
         region = None if plan.region.strip().lower() in ("", "none") else plan.region.strip()
 
@@ -334,8 +368,21 @@ class DateCandidate:
         # 프롬프트로 안 되는 것을 코드가 막는 자리다 — 자리별 카테고리 강제(`SLOTS`),
         # 화면 자수 한도(`limits.py`)와 같은 패턴이다. **애매하면 개입하지 않는다.**
         if region is None:
-            ctx.trace.skip(self.name, "지역 단서 없음 — 아무 데나 추천하지 않는다")
-            return None
+            if demo is None:
+                ctx.trace.skip(self.name, "지역 단서 없음 — 아무 데나 추천하지 않는다")
+                return None
+            # 시연 모드의 기본 지역. 지어낸 지역이 화면에 가는 위험(위 주석의 천안 사고)은
+            # 시연 대본이 지역을 말하면 사라진다 — 이 폴백은 대본이 빗나갔을 때의 안전망이다.
+            region = DEMO_DATE_REGION
+            ctx.trace.warn(self.name, f"시연 모드 — 지역 단서 없음, 기본 지역 '{region}'")
+
+        if demo is not None:
+            # LLM 이 보류하면서 검색어를 비워 보냈을 때만 채운다. 준 검색어는 건드리지 않는다.
+            plan = plan.model_copy(update={
+                "meal_queries": plan.meal_queries or ["맛집", "파스타"],
+                "sight_queries": plan.sight_queries or ["소품샵", "전시"],
+                "cafe_queries": plan.cafe_queries or ["카페", "디저트 카페"],
+            })
 
         course = date_course.build_course(plan, region)
 
@@ -402,6 +449,10 @@ class YoutubeCandidate:
     name = "youtube"
 
     def build(self, ctx: Context) -> AiResult | None:
+        # 시연 강제 트리거 — 억제·쿨다운·게이트를 전부 건너뛰고 화제 갈래를 태운다.
+        if (demo := demo_hit(ctx, "유튜브")) is not None:
+            return self._topic(ctx, demo=demo)
+
         # **억제를 게이트보다 먼저 본다.** 뒤에 두면 이미 LLM 분류를 부른 뒤라
         # 아낀 게 검색 쿼터뿐이다. 여기서 끊으면 LLM 호출까지 같이 준다.
         # 두 갈래에 똑같이 건다 — 쿼터는 갈래를 가리지 않고 한 통에서 나간다.
@@ -501,7 +552,7 @@ class YoutubeCandidate:
         return _fit(ctx, self.name, result, _again)
 
     # ---------------------------------------------------------------- ② 화제
-    def _topic(self, ctx: Context) -> AiResult | None:
+    def _topic(self, ctx: Context, demo: Message | None = None) -> AiResult | None:
         # **데이트 의도가 뚜렷하면 화제 갈래를 타지 않는다.**
         # "주말에 뭐 할까" 에는 장소 추천이 나가야 한다. 영상이 끼어들면 자리를 뺏는다.
         #
@@ -513,14 +564,17 @@ class YoutubeCandidate:
         # 하나로 걸려서, **먹방 얘기가 통째로 데이트 의도로 잡힌다** (실측 — case13).
         # 약속을 잡는 신호(계획 질문 · 일정 확정 · 이전 약속 재언급)일 때만 비킨다.
         # 약한 신호로 데이트가 실제로 발동하면 `run()` 이 조립 시점에 뺀다.
-        kinds = set(date_course.check_date_gate(ctx.active).kinds)
-        if kinds & DATE_INTENT_STRONG:
-            ctx.trace.skip(self.name, "약속을 잡는 대화 — 장소 추천에 자리를 넘김")
-            return None
+        if demo is None:
+            kinds = set(date_course.check_date_gate(ctx.active).kinds)
+            if kinds & DATE_INTENT_STRONG:
+                ctx.trace.skip(self.name, "약속을 잡는 대화 — 장소 추천에 자리를 넘김")
+                return None
 
-        trigger_ids = youtube.check_topic_gate(ctx.active)
-        if not trigger_ids:
-            return None
+            trigger_ids = youtube.check_topic_gate(ctx.active)
+            if not trigger_ids:
+                return None
+        else:
+            trigger_ids = [demo.message_id]
 
         if not self._ready(ctx):
             return None
@@ -528,8 +582,13 @@ class YoutubeCandidate:
         topic = youtube.classify_topic(ctx.active)
         ctx.trace.topic = topic
         if not topic.should_recommend or not topic.queries:
-            ctx.trace.skip(self.name, "LLM 판정 — 영상으로 이어 붙일 화제가 아님")
-            return None
+            if demo is None:
+                ctx.trace.skip(self.name, "LLM 판정 — 영상으로 이어 붙일 화제가 아님")
+                return None
+            # 시연 모드 — 검색어가 없으면 방금 발화에서 키워드를 뺀 나머지로 검색한다.
+            fallback = demo.content.replace("유튜브", "").strip() or "커플 브이로그"
+            topic = topic.model_copy(update={"should_recommend": True, "queries": [fallback]})
+            ctx.trace.warn(self.name, f"시연 모드 — LLM 보류 무시, 검색어 '{fallback}'")
 
         videos = self._candidates(ctx, topic.queries)
         if videos is None:
@@ -537,8 +596,15 @@ class YoutubeCandidate:
 
         pick = youtube.pick_topic_video(ctx.active, topic, videos)
         if not 0 <= pick.picked_index < len(videos):
-            ctx.trace.skip(self.name, "후보 전원 탈락 — 침묵")
-            return None
+            if demo is None:
+                ctx.trace.skip(self.name, "후보 전원 탈락 — 침묵")
+                return None
+            # 시연 모드 — 침묵 대신 첫 후보를 쓴다. 문구는 효과를 약속하지 않는 고정문.
+            pick = pick.model_copy(update={
+                "picked_index": 0,
+                "recommendation_reason": "말씀 나눈 주제와 이어지는 영상이에요",
+            })
+            ctx.trace.warn(self.name, "시연 모드 — LLM 이 후보를 전원 탈락시켜 첫 후보로 대체")
 
         video = videos[pick.picked_index]
         ctx.trace.yt_picked = video
@@ -632,6 +698,7 @@ def route(ctx: Context) -> list[AiResult]:
             SUPPRESS_YOUTUBE_WHEN_TONE
             and candidate.name == "youtube"
             and any(r.result_type == "TONE_CORRECTION" for r in results)
+            and demo_hit(ctx, "유튜브") is None
         ):
             ctx.trace.skip(candidate.name, "말투 교정이 발동한 요청 — 냉각기가 아니므로 보류")
             continue
@@ -694,7 +761,8 @@ def run(ctx: Context) -> tuple[list[EmotionAnalysis], list[AiResult]]:
 
         # 유튜브는 말투 결과를 알아야 한다 (의존 ②)
         tone_result = f_tone.result()
-        if SUPPRESS_YOUTUBE_WHEN_TONE and tone_result is not None:
+        demo_yt = demo_hit(ctx, "유튜브")
+        if SUPPRESS_YOUTUBE_WHEN_TONE and tone_result is not None and demo_yt is None:
             ctx.trace.skip(youtube.name, "말투 교정이 발동한 요청 — 냉각기가 아니므로 보류")
             f_youtube = None
         else:
@@ -711,7 +779,7 @@ def run(ctx: Context) -> tuple[list[EmotionAnalysis], list[AiResult]]:
     # 화제 갈래는 뺀다. **"데이트 코스가 떠야 할 때는 영상을 띄우지 않는다"** 가 규칙이다.
     # 여기서 빼는 것은 지연을 늘리지 않는다 — 둘 다 이미 병렬로 끝나 있다.
     # (고민 갈래는 빼지 않는다. 갈등과 데이트는 성격이 달라 같이 떠도 어색하지 않다.)
-    if by_name[date.name] is not None and ctx.trace.topic is not None:
+    if by_name[date.name] is not None and ctx.trace.topic is not None and demo_yt is None:
         if by_name[youtube.name] is not None:
             ctx.trace.skip(youtube.name, "데이트 코스가 발동한 요청 — 화제 갈래는 자리를 넘김")
         by_name[youtube.name] = None
