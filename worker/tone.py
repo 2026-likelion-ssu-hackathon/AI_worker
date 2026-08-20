@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 
 from worker.llm import ask, load_prompt
 from worker.models import (
@@ -96,10 +97,68 @@ def harsh_in(text: str, profile: SpeakerProfile | None = None) -> str | None:
     return None
 
 
-# 인신공격 · 욕설. 맥락상 장난일 수 있으므로 룰은 후보만 잡고 확정은 LLM 이 한다.
+# correction_reason 이 언급하면 안 되는 형태 특징 — 원문에 그 문자가 없을 때.
+#
+# 실측(2026-08-20, 사용자 발견): 마침표 없는 메시지에 "마침표로 끝나 단호하게 들릴 수
+# 있어요"가 나갔다. 프롬프트에 들어가는 **"평소 말투 기준선" 설명(마침표율·ㅋ 개수)을
+# 이번 메시지의 특징으로 끌어다 쓴 것** — 사용자는 자기가 쓴 문장을 알고 있어서, 안 찍은
+# 마침표를 찍었다고 하는 순간 위젯 전체의 신뢰가 무너진다. 프롬프트에 근거 실재성 규칙을
+# 넣었지만(tone_suggest.md) 프롬프트만으로 안 지켜지는 것을 코드가 재검하는 자리다 —
+# 자수 한도·거친 어휘 검사와 같은 패턴.
+# ㅋ·이모지는 넣지 않는다 — 게이트 신호가 "평소보다 없음"(부재)이라, 원문에 없어도
+# 언급하는 게 정당하다. 여기는 **있다고 주장하려면 실제로 있어야 하는** 특징만 담는다.
+_FEATURE_CLAIMS = (("마침표", "."), ("물음표", "?"), ("느낌표", "!"))
+_REASON_QUOTE_RE = re.compile(r"'([^']+)'")
+
+
+# 대체 문장이 원문과 "사실상 같다"고 볼 유사도 임계.
+#
+# 실측 캘리브레이션(2026-08-20, 라이브 카드 + QA 배터리 출력 11쌍): 좋은 교정은 전부
+# 0.40 이하("야 너는 맨날 그런 식이야" → "오늘 그런 식이라서 좀 서운했어" = 0.35),
+# 가짜 교정은 0.86 이상("너 어제 … 누구야" → "어제 … 사람 누구야?" = 0.86)으로 갈렸다.
+# 0.75 는 그 사이의 여유 있는 경계다 — 낮추면 살짝 다듬은 진짜 교정까지 죽는다.
+# 비교 전에 공백·문장부호·ㅋㅎ 를 지운다 — 마침표 하나 바꾼 것은 교정이 아니다.
+SAME_RATIO = 0.75
+_SAME_STRIP_RE = re.compile(r"[\s.,!?~…ㅋㅎ]+")
+
+
+def same_message(alternative: str, original: str) -> bool:
+    """대체 문장이 원문과 사실상 같은가 — 같으면 교정이 아니다.
+
+    "말투 교정" 카드가 원문과 똑같은 문장을 제시하면(실측: "너 어제 공원에서 술 마신 거
+    누구야" → "어제 공원에서 술 마신 사람 누구야?") 사용자에게는 기능이 고장 난 것으로
+    보인다. 프롬프트도 "바꿀 게 없으면 억지로 만들지 않는다"고 하므로, 바뀐 게 없다는
+    것은 **교정할 것이 없었다**는 뜻이다 — 그 경우의 올바른 출력은 침묵이다.
+    """
+    a = _SAME_STRIP_RE.sub("", alternative)
+    o = _SAME_STRIP_RE.sub("", original)
+    if not a or not o:
+        return not a  # 빈 대체 문장은 교정이 아니다
+    return SequenceMatcher(None, o, a).ratio() >= SAME_RATIO
+
+
+def ungrounded_in(reason: str, diagnosis: str, original: str) -> str | None:
+    """진단·이유가 원문에 없는 특징을 주장하면 그 주장. 없으면 None.
+
+    검증 가능한 주장만 본다 — 형태 특징(마침표류)과 따옴표 인용. "단호하게 들린다" 같은
+    해석은 LLM 의 몫이라 건드리지 않는다.
+    """
+    for claimed in (reason, diagnosis):
+        for word, char in _FEATURE_CLAIMS:
+            if word in claimed and char not in original:
+                return f"{word} 언급 (원문에 없음)"
+    for quoted in _REASON_QUOTE_RE.findall(reason):
+        if quoted not in original:
+            return f"인용 '{quoted}' (원문에 없음)"
+    return None
+
+
+# 인신공격 · 욕설 · 도발. 맥락상 장난일 수 있으므로 룰은 후보만 잡고 확정은 LLM 이 한다.
+# "장난해?" 류는 급변 신호 축소(가벼움 표지 묶음, 2026-08-20)로 놓치게 된 명백한 도발을
+# 어휘로 되잡는 것이다 — 물음표까지 있어야 잡는다 ("장난해 놀자"는 도발이 아니다).
 _INSULT_RE = re.compile(
     r"(미친|또라이|돌+았|바보|멍청|한심|어이없|찌질|재수\s*없|밥맛|꺼져|닥쳐|"
-    r"시끄러|짜증|정\s*떨어|질린다|역겹|쓰레기같)"
+    r"시끄러|짜증|정\s*떨어|질린다|역겹|쓰레기같|장난(해|하냐|하니|이야|임)\s*\?)"
 )
 
 # 일반화 화법
@@ -161,12 +220,20 @@ def _abrupt_flags(text: str, profile: SpeakerProfile) -> list[str]:
         signals.append(f"평소 마침표 종결 {profile.period_rate:.0%} → 이번엔 마침표로 끝남")
 
     # 짧아진 게 아닐 때만 센다 (위 설명)
+    #
+    # ⚠️ ㅋ 부재와 이모지 부재는 **하나의 신호다** (2026-08-20 실측). 진지한 메시지에는
+    # 둘 다 없는 게 당연해서, 따로 세면 ㅋ·이모지를 즐겨 쓰는 커플의 **모든 평범한 진지
+    # 메시지가 신호 2개**로 `ABRUPT_ALONE_SIGNALS` 를 채운다 — "점심은 집에 있는거
+    # 먹었어"가 게이트를 지나 판정 LLM 편차에 노출됐고 교정 카드까지 떴다.
+    # 짧아짐과 ㅋ·이모지 부재를 묶은 것과 같은 원리다("상관된 신호를 따로 세지 않는다").
     if not shortened:
+        lightness_gone: list[str] = []
         if profile.laugh_per_msg >= LAUGH_BASELINE and not _LAUGH_RE.search(text):
-            signals.append(f"평소 ㅋ/ㅎ {profile.laugh_per_msg:.1f}개 → 이번엔 0개")
-
+            lightness_gone.append(f"ㅋ/ㅎ {profile.laugh_per_msg:.1f}개 → 0개")
         if profile.emoji_rate >= EMOJI_BASELINE and not _EMOJI_RE.search(text):
-            signals.append(f"평소 이모지 {profile.emoji_rate:.0%} → 이번엔 없음")
+            lightness_gone.append(f"이모지 {profile.emoji_rate:.0%} → 없음")
+        if lightness_gone:
+            signals.append("평소의 가벼움 표지가 사라짐 — " + " · ".join(lightness_gone))
 
     if profile.avg_length >= 8:
         if count_short:
@@ -178,14 +245,26 @@ def _abrupt_flags(text: str, profile: SpeakerProfile) -> list[str]:
 
 
 def _repetition_flag(messages: list[Message], speaker: str) -> str | None:
-    """비슷한 말 반복 ("전화 받아 - 받아 - 받으라고")."""
+    """같은 말을 거듭 밀어붙이는 반복 ("전화 받아 - 받아 - 받으라고").
+
+    ⚠️ **공유 단어가 있다는 것만으로는 반복이 아니다** (2026-08-20 실측 — "오늘 재택이라
+    집에 있어" / "점심은 집에 있는거 먹었어"가 '집에' 하나로 잡혀 평온한 잡담에 교정
+    카드가 떴다). 밀어붙임은 **메시지가 그 말로 채워져 있는 것**이다 — 인접한 두 짧은
+    메시지에서 공유 토큰이 양쪽 모두의 절반 이상을 차지할 때만 인정한다.
+    (예전 규칙은 전체 교집합이라 정작 "전화 받아 - 받아 - 받으라고"는 셋의 교집합이
+    비어서 못 잡고, 흔한 단어를 공유한 잡담은 잡는 — 의도와 반대인 모양이었다.)
+    """
     mine = [m for m in messages if m.sender == speaker][-3:]
     if len(mine) < 2:
         return None
-    token_sets = [{t for t in _TOKEN_RE.findall(m.content) if len(t) >= 2} for m in mine]
-    shared = set.intersection(*token_sets) if token_sets else set()
-    if shared and all(_norm_len(m.content) <= 15 for m in mine):
-        return f"최근 {len(mine)}개 메시지에 '{sorted(shared)[0]}' 반복"
+    for a, b in zip(mine, mine[1:]):
+        if _norm_len(a.content) > 15 or _norm_len(b.content) > 15:
+            continue
+        tokens_a = {t for t in _TOKEN_RE.findall(a.content) if len(t) >= 2}
+        tokens_b = {t for t in _TOKEN_RE.findall(b.content) if len(t) >= 2}
+        shared = tokens_a & tokens_b
+        if shared and len(shared) * 2 >= len(tokens_a) and len(shared) * 2 >= len(tokens_b):
+            return f"'{sorted(shared)[0]}' 를 거듭 밀어붙임"
     return None
 
 

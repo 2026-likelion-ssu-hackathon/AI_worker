@@ -66,7 +66,14 @@ from worker.places import KakaoPlace
 from worker.profile import resolve_profile
 from worker.retrieve import mark_used, recent_context, retrieve_many, save_memories
 from worker.segment import active_context, segment
-from worker.tone import check_tone_gate, harsh_in, tone_judge, tone_suggest
+from worker.tone import (
+    check_tone_gate,
+    harsh_in,
+    same_message,
+    tone_judge,
+    tone_suggest,
+    ungrounded_in,
+)
 from worker.ytapi import Video
 
 # 갈등 중재가 발동한 요청에서는 유튜브 추천을 건너뛴다.
@@ -77,6 +84,21 @@ from worker.ytapi import Video
 # LLM 판정(`yt_concern.md`)도 "한창 싸우는 중이면 false"로 막고 있지만, 규칙으로 한 번 더 막는다.
 # 정책이 바뀌면 이 상수만 False 로 두면 된다.
 SUPPRESS_YOUTUBE_WHEN_TONE = True
+
+# 병합 감정 상태가 ESCALATED(분노 뚜렷)인 요청에서는 데이트 코스를 보류한다.
+#
+# 배포 실측(2026-08-20, QA.md 발견 6): "자기 진짜 개같아 / 나도 너 싫어" 3초 뒤에
+# 데이트 코스가 저장됐다 — 싸움 한복판에 "주말에 여기 가보세요"가 뜨면 서비스가 상황을
+# 못 읽는 것으로 보인다. 상태는 같은 요청에서 어차피 병렬로 계산되므로(read_state)
+# 추가 호출도 지연도 없다 — 결과를 담기 직전에 라벨만 본다.
+#
+# **ESCALATED 만 본다. ACCUMULATED(서운)는 막지 않는다** (2026-08-20 사용자 결정).
+# 서운할 때의 데이트 제안은 화해 시도일 수 있어서다 — case15(약속 잡다가 답답해짐,
+# 말투+데이트 동시 발동)도 ENGAGED 라 이 보류에 걸리지 않는다.
+# 시연 강제 트리거('데이트' 낱말)는 이 보류를 무시한다 — "말했는데 안 뜨는" 사고 방지가
+# 데모 모드의 존재 이유라서다 (같은 결정). 상태 산출이 실패한 요청(빈 목록)도 보류하지
+# 않는다 — 근거 없이 기능을 끄지 않는다.
+SUPPRESS_DATE_WHEN_ESCALATED = True
 
 # 유튜브 억제 — **같은 화제엔 영상 하나만** + 시간 백스톱 (분).
 #
@@ -307,6 +329,34 @@ class ToneCandidate:
                 result = retry
             else:
                 ctx.trace.warn(self.name, f"대체 문장에 거친 표현이 남음 — '{harsh}'")
+
+        # 진단·이유가 원문에 없는 특징(안 찍은 마침표 등)을 주장하면 1회 재생성.
+        # 거친 어휘와 같은 취급 — 품질 문제라 버리지는 않고, 남으면 흔적만 남긴다.
+        def _claims(r: AiResult) -> str | None:
+            return ungrounded_in(
+                r.result_data.correction_reason, r.result_data.situation_diagnosis,
+                gate.message or "",
+            )
+
+        if (claim := _claims(result)) is not None:
+            retry = _make()
+            if _claims(retry) is None:
+                result = retry
+            else:
+                ctx.trace.warn(self.name, f"근거가 원문에 없음 — {claim}")
+
+        # 대체 문장이 원문과 사실상 같으면 1회 재생성, 그래도 같으면 **내보내지 않는다.**
+        #
+        # 거친 어휘·근거 조작과 달리 여기는 버린다 — 바뀐 게 없는 "교정" 카드는 남는
+        # 가치가 0이고 기능이 고장 난 것으로 보인다. 바꿀 게 없었다는 뜻이므로 침묵이
+        # 올바른 출력이다 ("애매하면 개입하지 않는다").
+        if same_message(result.result_data.alternative_sentence, gate.message or ""):
+            retry = _make()
+            if not same_message(retry.result_data.alternative_sentence, gate.message or ""):
+                result = retry
+            else:
+                ctx.trace.skip(self.name, "대체 문장이 원문과 같음 — 교정할 것이 없다")
+                return None
 
         return _fit(ctx, self.name, result, _make)
 
@@ -628,6 +678,10 @@ def route(ctx: Context) -> list[AiResult]:
 
     동작이 같아야 하므로 `run()` 과 규칙을 공유한다 — 우선순위 순서, 유튜브 보류 조건,
     `trace.fired` 내용이 전부 동일하다. 병렬 실행을 끄고 원인을 좁힐 때 쓴다.
+
+    **한 가지만 다르다**: 격앙 상태의 데이트 보류(`SUPPRESS_DATE_WHEN_ESCALATED`)는
+    상태 산출 결과가 필요해서 `run()` 에만 있다 — 여기는 후보만 돌리고 상태를 모른다.
+    파이프라인은 항상 `run()` 을 쓰므로 실동작에는 차이가 없다.
     """
     results: list[AiResult] = []
     for candidate in CANDIDATES:
@@ -709,6 +763,18 @@ def run(ctx: Context) -> tuple[list[EmotionAnalysis], list[AiResult]]:
             youtube.name: f_youtube.result() if f_youtube is not None else None,
         }
         states = f_state.result()
+
+    # 격앙 상태면 데이트 보류 (상수 주석 참조). 상태가 이미 나와 있어 지연이 없고,
+    # 데모 강제 트리거('데이트' 낱말)로 태운 카드는 그대로 둔다.
+    if (
+        SUPPRESS_DATE_WHEN_ESCALATED
+        and by_name[date.name] is not None
+        and states
+        and states[0].emotion_type == "ESCALATED"
+        and demo_hit(ctx, "데이트") is None
+    ):
+        by_name[date.name] = None
+        ctx.trace.skip(date.name, "감정이 격앙된 요청(ESCALATED) — 데이트 코스 보류")
 
     results: list[AiResult] = []
     for candidate in CANDIDATES:

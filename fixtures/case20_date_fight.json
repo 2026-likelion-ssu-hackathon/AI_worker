@@ -1,0 +1,57 @@
+{
+  "analysisRequestId": "d0e4b2c3-5a6f-5d7e-9f80-201b3c4d5e6f",
+  "chatRoomId": 1,
+  "participants": [
+    {
+      "participantKey": "USER_A"
+    },
+    {
+      "participantKey": "USER_B"
+    }
+  ],
+  "messages": [
+    {
+      "messageId": 2001,
+      "sender": "USER_B",
+      "content": "자기야 우리 이번주말에 성수에서 데이트할까?",
+      "sentAt": "2026-08-14T19:30:00+09:00"
+    },
+    {
+      "messageId": 2002,
+      "sender": "USER_A",
+      "content": "난 성수 좋아 ㅎㅎ",
+      "sentAt": "2026-08-14T19:30:20+09:00"
+    },
+    {
+      "messageId": 2003,
+      "sender": "USER_A",
+      "content": "자기 진짜 개같아",
+      "sentAt": "2026-08-14T19:30:30+09:00"
+    },
+    {
+      "messageId": 2004,
+      "sender": "USER_B",
+      "content": "나도 너 싫어",
+      "sentAt": "2026-08-14T19:30:40+09:00"
+    },
+    {
+      "messageId": 2005,
+      "sender": "USER_B",
+      "content": "맨날 니맘대로지",
+      "sentAt": "2026-08-14T19:30:50+09:00"
+    },
+    {
+      "messageId": 2006,
+      "sender": "USER_B",
+      "content": "자기야 우리",
+      "sentAt": "2026-08-14T19:32:00+09:00"
+    },
+    {
+      "messageId": 2007,
+      "sender": "USER_B",
+      "content": "이번주 토요일에 용산에서 데이트할까 ㅎㅎ",
+      "sentAt": "2026-08-14T19:32:10+09:00"
+    }
+  ],
+  "requestedAt": "2026-08-14T19:32:15+09:00"
+}
