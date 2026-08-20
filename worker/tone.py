@@ -107,7 +107,7 @@ def harsh_in(text: str, profile: SpeakerProfile | None = None) -> str | None:
 # 자수 한도·거친 어휘 검사와 같은 패턴.
 # ㅋ·이모지는 넣지 않는다 — 게이트 신호가 "평소보다 없음"(부재)이라, 원문에 없어도
 # 언급하는 게 정당하다. 여기는 **있다고 주장하려면 실제로 있어야 하는** 특징만 담는다.
-_FEATURE_CLAIMS = (("마침표", "."), ("물음표", "?"), ("느낌표", "!"))
+_FEATURE_CLAIMS = (("물음표", "?"), ("느낌표", "!"))
 _REASON_QUOTE_RE = re.compile(r"'([^']+)'")
 
 
@@ -144,6 +144,11 @@ def ungrounded_in(reason: str, diagnosis: str, original: str) -> str | None:
     해석은 LLM 의 몫이라 건드리지 않는다.
     """
     for claimed in (reason, diagnosis):
+        # 마침표는 문자 포함이 아니라 **마침표 종결**이어야 한다 — "왜 그래 또.." 처럼
+        # 말줄임표('..')가 섞이면 '.' 문자는 있지만 "마침표로 끝나 단호"는 조작이다.
+        # 게이트가 마침표를 볼 때 쓰는 것과 같은 기준(_PERIOD_END_RE)으로 판정한다.
+        if "마침표" in claimed and not _PERIOD_END_RE.search(original):
+            return "마침표 언급 (원문이 마침표 종결이 아님)"
         for word, char in _FEATURE_CLAIMS:
             if word in claimed and char not in original:
                 return f"{word} 언급 (원문에 없음)"
