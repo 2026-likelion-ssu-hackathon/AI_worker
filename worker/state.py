@@ -152,6 +152,31 @@ def has_affection_words(text: str) -> bool:
 # 프론트는 이전 문구를 계속 띄우게 된다.
 EXPIRE_AFTER = GAP_HARD
 
+# 채점 대상은 **마지막 이 개수**만. 앞은 흐름을 읽는 맥락으로만 넘긴다.
+#
+# 배포 실측(2026-08-20, QA.md QA8): 격한 싸움 뒤 화해 6건 + 화제 전환 4건을 쌓아도
+# `ESCALATED` 가 안 내려왔다. 싸움 발화가 채점 가능한 로그에 남아 있는 한 프롬프트
+# 앵커("3 = 로그에서 문장으로 짚을 수 있다")에 분노가 계속 걸린다 — "뒤쪽이 근거"라는
+# 지침만으로는 같은 세그먼트 안에서 안 지켜졌다. 그래서 분절 채점(`segment._transcript`)과
+# 같은 방식으로 **구획을 갈라 인용 자체를 막는다.** 프롬프트로 안 되는 것을 구조가 막는
+# 자리다 — 자리별 카테고리 강제·자수 한도와 같은 패턴.
+#
+# 6인 이유: 시연 대본의 장면이 4~6줄이라 장면 하나가 통째로 들어가고, 화해가 세 턴
+# (사과 → 수용 → 다정) 쌓이면 싸움이 창 밖으로 완전히 밀려난다. 줄이면 전환이 빨라지고
+# 늘리면 직전 감정이 오래 남는다 — 손잡이가 여기 있다.
+SCORE_RECENT = 6
+
+
+def _transcript(context: list[Message], targets: list[Message]) -> str:
+    """채점 대상과 앞 맥락을 구획으로 나눠 준다. 맥락이 없으면 기존 단일 형식 그대로다."""
+    body = format_transcript(targets)
+    if not context:
+        return body
+    return (
+        f"## 앞 맥락 (흐름만 — 채점 금지)\n{format_transcript(context)}\n\n"
+        f"## 채점 대상 (지금 감정)\n{body}"
+    )
+
 
 @dataclass
 class StateResult:
@@ -194,8 +219,11 @@ def read_state(
     if not messages or len(speakers) < 2:
         return StateResult()
 
+    # 채점은 마지막 SCORE_RECENT 개만 — 앞은 흐름용 맥락으로만 넘긴다 (상수 주석 참조).
+    targets = messages[-SCORE_RECENT:]
     try:
-        out = ask(StateLLMOutput, load_prompt("state"), format_transcript(messages))
+        out = ask(StateLLMOutput, load_prompt("state"),
+                  _transcript(messages[:-SCORE_RECENT], targets))
     except Exception:  # noqa: BLE001 — 채점 실패는 오류가 아니라 '갱신 없음'이다
         return StateResult()
 
@@ -203,9 +231,11 @@ def read_state(
     last_at = max(m.sent_at for m in messages)
 
     # ① 화자별 유효 점수 — 기존 규칙을 화자 단위로 적용한 뒤에야 병합에 넣는다.
+    #    발화 유무·애정 낱말도 **채점 대상 구간 기준**이다 — 상태는 지금을 보여주는
+    #    자리라, 창 밖 발화로 기여 자격이나 바닥값을 만들면 채점 제한이 새로 샌다.
     merged = {"affection": 0, "hurt": 0, "joy": 0, "anger": 0}
     for subject in speakers:
-        own = [m for m in messages if m.sender == subject]
+        own = [m for m in targets if m.sender == subject]
         state = scored.get(subject)
         # 애정 낱말은 직전 발화만 본다 (상수 주석 참조).
         hinted = any(has_affection_words(m.content) for m in own[-AFFECTION_RECENT:])

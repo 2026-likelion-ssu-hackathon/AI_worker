@@ -1,0 +1,99 @@
+{
+  "analysisRequestId": "c9f3a1d2-4b5e-5c6d-8e7f-190a2b3c4d5e",
+  "chatRoomId": 1,
+  "participants": [
+    {
+      "participantKey": "USER_A"
+    },
+    {
+      "participantKey": "USER_B"
+    }
+  ],
+  "messages": [
+    {
+      "messageId": 1901,
+      "sender": "USER_A",
+      "content": "아까 낮에 했던 얘기 다시 생각하니까 화가 나",
+      "sentAt": "2026-08-14T21:00:00+09:00"
+    },
+    {
+      "messageId": 1902,
+      "sender": "USER_A",
+      "content": "어떻게 나한테 그렇게 말할 수가 있어 진짜 너무하잖아",
+      "sentAt": "2026-08-14T21:01:00+09:00"
+    },
+    {
+      "messageId": 1903,
+      "sender": "USER_A",
+      "content": "지금 장난해? 계속 이런 식이면 나도 참을 만큼 참았어",
+      "sentAt": "2026-08-14T21:02:00+09:00"
+    },
+    {
+      "messageId": 1904,
+      "sender": "USER_B",
+      "content": "화났구나 미안해 내가 잘못 생각했던 것 같아",
+      "sentAt": "2026-08-14T21:03:00+09:00"
+    },
+    {
+      "messageId": 1905,
+      "sender": "USER_A",
+      "content": "말로만 미안하다고 하지 말고 좀 달라졌으면 좋겠어 진짜 화나니까",
+      "sentAt": "2026-08-14T21:04:00+09:00"
+    },
+    {
+      "messageId": 1906,
+      "sender": "USER_B",
+      "content": "응 알겠어 네 말이 맞아 천천히 얘기해보자",
+      "sentAt": "2026-08-14T21:05:00+09:00"
+    },
+    {
+      "messageId": 1907,
+      "sender": "USER_A",
+      "content": "얘기 들어줘서 고마워 나도 말이 심했어",
+      "sentAt": "2026-08-14T21:07:00+09:00"
+    },
+    {
+      "messageId": 1908,
+      "sender": "USER_B",
+      "content": "아니야 네 마음 알아 우리 잘 풀어서 다행이야 사랑해",
+      "sentAt": "2026-08-14T21:08:00+09:00"
+    },
+    {
+      "messageId": 1909,
+      "sender": "USER_A",
+      "content": "이제 진짜 괜찮아 우리 내일 맛있는 거 먹으러 가자",
+      "sentAt": "2026-08-14T21:09:00+09:00"
+    },
+    {
+      "messageId": 1910,
+      "sender": "USER_B",
+      "content": "좋아 내일 보자 오늘 푹 쉬어",
+      "sentAt": "2026-08-14T21:10:00+09:00"
+    },
+    {
+      "messageId": 1911,
+      "sender": "USER_B",
+      "content": "아 맞다 나 내일 오전에 회의 있어서 좀 일찍 자야 해",
+      "sentAt": "2026-08-14T21:11:00+09:00"
+    },
+    {
+      "messageId": 1912,
+      "sender": "USER_A",
+      "content": "응응 그래 나도 오늘 일찍 자려고",
+      "sentAt": "2026-08-14T21:12:00+09:00"
+    },
+    {
+      "messageId": 1913,
+      "sender": "USER_B",
+      "content": "내일 점심에 뭐 먹을지 생각해두자",
+      "sentAt": "2026-08-14T21:13:00+09:00"
+    },
+    {
+      "messageId": 1914,
+      "sender": "USER_A",
+      "content": "좋아 자기 전에 연락할게",
+      "sentAt": "2026-08-14T21:14:00+09:00"
+    }
+  ],
+  "requestedAt": "2026-08-14T21:15:00+09:00"
+}
