@@ -381,6 +381,20 @@ class DateCandidate:
         if not gate.triggered:
             return None
 
+        # **같은 화제엔 코스 하나만** (2026-08-21 통합 시연 실측). 게이트가 방금 발화가
+        # 아니라 활성 세그먼트 전체를 봐서, "데이트할까?" 뒤에는 화제가 이어지는 동안
+        # 모든 메시지가 코스를 다시 태웠다 — "사랑해 그날 봐"에서도 새 코스가 나갔고,
+        # 최근 추천 장소 제외(`recent_keys`)와 겹쳐 재발동마다 **다른 가게**로 바뀌었다.
+        # 유튜브의 세그먼트 억제와 같은 규칙: 마지막 코스가 활성 세그먼트 시작 뒤에
+        # 나갔으면 지금 화제에 이미 답한 것이다. 화제가 바뀌면(새 세그먼트) 바로 풀린다.
+        # 근거는 서버가 실어주는 `recentResults[].createdAt` — 워커는 상태를 갖지 않는다.
+        # 시연 강제 트리거('데이트' 낱말)는 다른 억제처럼 여기도 건너뛴다 — 리허설 연발용.
+        if demo is None:
+            last = ctx.last_result_at("DATE_RECOMMENDATION")
+            if last is not None and ctx.active and last >= ctx.active[0].sent_at:
+                ctx.trace.skip(self.name, "이 화제에 이미 코스를 냈다 — 새 화제까지 보류")
+                return None
+
         if not places.available():
             ctx.trace.skip(self.name, "KAKAO_REST_API_KEY 없음 — 장소를 지어내지 않고 미발동")
             return None

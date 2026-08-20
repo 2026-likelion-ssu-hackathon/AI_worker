@@ -1,0 +1,177 @@
+{
+  "analysisRequestId": "d1a2b3c4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+  "chatRoomId": 1,
+  "participants": [
+    {
+      "participantKey": "USER_A"
+    },
+    {
+      "participantKey": "USER_B"
+    }
+  ],
+  "messages": [
+    {
+      "messageId": 2101,
+      "sender": "USER_A",
+      "content": "오늘 하루 그냥 무난했어",
+      "sentAt": "2026-08-21T20:00:00+09:00"
+    },
+    {
+      "messageId": 2102,
+      "sender": "USER_B",
+      "content": "나도 별일 없었어",
+      "sentAt": "2026-08-21T20:00:20+09:00"
+    },
+    {
+      "messageId": 2103,
+      "sender": "USER_A",
+      "content": "저녁은 대충 챙겨 먹으려고",
+      "sentAt": "2026-08-21T20:00:40+09:00"
+    },
+    {
+      "messageId": 2104,
+      "sender": "USER_B",
+      "content": "응 나도 간단하게 먹을래",
+      "sentAt": "2026-08-21T20:01:00+09:00"
+    },
+    {
+      "messageId": 2105,
+      "sender": "USER_A",
+      "content": "어제 일 생각하면 아직 마음이 좀 무거워",
+      "sentAt": "2026-08-21T20:01:20+09:00"
+    },
+    {
+      "messageId": 2106,
+      "sender": "USER_B",
+      "content": "나도 계속 신경 쓰였어",
+      "sentAt": "2026-08-21T20:01:40+09:00"
+    },
+    {
+      "messageId": 2107,
+      "sender": "USER_A",
+      "content": "서운했던 게 잘 안 풀리네 어떻게 말해야 할지 모르겠어",
+      "sentAt": "2026-08-21T20:02:00+09:00"
+    },
+    {
+      "messageId": 2108,
+      "sender": "USER_B",
+      "content": "미안해 나도 어떻게 풀어야 할지 몰라서 말을 못 꺼냈어",
+      "sentAt": "2026-08-21T20:02:20+09:00"
+    },
+    {
+      "messageId": 2109,
+      "sender": "USER_A",
+      "content": "오늘은 일단 각자 좀 생각해보자",
+      "sentAt": "2026-08-21T20:02:40+09:00"
+    },
+    {
+      "messageId": 2110,
+      "sender": "USER_B",
+      "content": "근데 오늘도 야근이라 늦을 것 같아",
+      "sentAt": "2026-08-21T20:03:00+09:00"
+    },
+    {
+      "messageId": 2111,
+      "sender": "USER_A",
+      "content": "또? 어제도 그랬잖아",
+      "sentAt": "2026-08-21T20:03:20+09:00"
+    },
+    {
+      "messageId": 2112,
+      "sender": "USER_B",
+      "content": "미안 진짜 어쩔 수 없었어",
+      "sentAt": "2026-08-21T20:03:40+09:00"
+    },
+    {
+      "messageId": 2113,
+      "sender": "USER_A",
+      "content": "야 너는 맨날 일이 먼저야.",
+      "sentAt": "2026-08-21T20:04:00+09:00"
+    },
+    {
+      "messageId": 2114,
+      "sender": "USER_B",
+      "content": "아 맞다 오늘 택배 왔더라",
+      "sentAt": "2026-08-21T20:04:20+09:00"
+    },
+    {
+      "messageId": 2115,
+      "sender": "USER_A",
+      "content": "응 문 앞에 있길래 안에 뒀어",
+      "sentAt": "2026-08-21T20:04:40+09:00"
+    },
+    {
+      "messageId": 2116,
+      "sender": "USER_A",
+      "content": "나 오늘 지각해서 팀장님한테 엄청 혼났어 ㅋㅋㅋ",
+      "sentAt": "2026-08-21T20:05:00+09:00"
+    },
+    {
+      "messageId": 2117,
+      "sender": "USER_B",
+      "content": "와 미친 ㅋㅋㅋ 또 늦었어?",
+      "sentAt": "2026-08-21T20:05:20+09:00"
+    },
+    {
+      "messageId": 2118,
+      "sender": "USER_A",
+      "content": "ㅋㅋㅋ 알람 세 개 다 껐대 내가 기억도 안 나 ㅋㅋ",
+      "sentAt": "2026-08-21T20:05:40+09:00"
+    },
+    {
+      "messageId": 2119,
+      "sender": "USER_B",
+      "content": "야 이 바보야 ㅋㅋ",
+      "sentAt": "2026-08-21T20:06:00+09:00"
+    },
+    {
+      "messageId": 2120,
+      "sender": "USER_B",
+      "content": "나 이번주 금요일에 연차 냈어!!",
+      "sentAt": "2026-08-21T20:06:20+09:00"
+    },
+    {
+      "messageId": 2121,
+      "sender": "USER_A",
+      "content": "헐 대박 잘됐다 ㅋㅋㅋ",
+      "sentAt": "2026-08-21T20:06:40+09:00"
+    },
+    {
+      "messageId": 2122,
+      "sender": "USER_B",
+      "content": "그니까 완전 신나 ㅋㅋ 하루가 통째로 비어",
+      "sentAt": "2026-08-21T20:07:00+09:00"
+    },
+    {
+      "messageId": 2123,
+      "sender": "USER_A",
+      "content": "오 그럼 오랜만에 놀러 가자",
+      "sentAt": "2026-08-21T20:07:20+09:00"
+    },
+    {
+      "messageId": 2124,
+      "sender": "USER_A",
+      "content": "아 배고프다 뭐 먹지",
+      "sentAt": "2026-08-21T20:07:40+09:00"
+    },
+    {
+      "messageId": 2125,
+      "sender": "USER_B",
+      "content": "그럼 우리 금요일에 성수에서 데이트할까?",
+      "sentAt": "2026-08-21T20:08:00+09:00"
+    },
+    {
+      "messageId": 2126,
+      "sender": "USER_A",
+      "content": "좋아 성수 완전 좋지",
+      "sentAt": "2026-08-21T20:08:20+09:00"
+    }
+  ],
+  "recentResults": [
+    {
+      "resultType": "DATE_RECOMMENDATION",
+      "referenceKey": "할머니의레시피",
+      "createdAt": "2026-08-21T20:08:12+09:00"
+    }
+  ]
+}
